@@ -78,8 +78,9 @@ const SKY = { clear: 0x4d5f82, rain: 0x38424f, snow: 0x8896ad };   // dusk / blu
 
 let renderer, scene, camera, controls, composer;
 let islandSmooth, islandLow, island;
-let ocean, lightSprites, lanterns;
-const clouds = [];
+let ocean, beams;
+const clouds = [], beamData = [];
+const BEAM_CAP = 4000;
 let raindrops, snowflakes, skyText;
 let weather = 'clear', lowpoly = false;
 let snowCover = 0, snowTarget = 0, snowApplied = -1;
@@ -95,6 +96,7 @@ const HOME_CAM = new THREE.Vector3(0, 42, 50), HOME_TGT = new THREE.Vector3(0, 0
 
 const glowTex = makeGlowTexture();
 const cloudTex = makeCloudTexture();
+const beamTex = makeBeamTexture();
 
 init();
 
@@ -159,6 +161,14 @@ function makeCloudTexture() {
     const grd=g.createRadialGradient(x,y,0,x,y,r); grd.addColorStop(0,'rgba(255,255,255,0.95)'); grd.addColorStop(1,'rgba(255,255,255,0)');
     g.fillStyle=grd; g.beginPath(); g.arc(x,y,r,0,7); g.fill(); }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function makeBeamTexture() {
+  const w=48, h=256, c=document.createElement('canvas'); c.width=w; c.height=h; const g=c.getContext('2d');
+  const img=g.createImageData(w,h);
+  for (let y=0;y<h;y++){ const vy=y/h; const va=Math.pow(vy,1.6);            // bright at base, fade upward
+    for (let x=0;x<w;x++){ const dx=(x-w/2)/(w/2); const ha=Math.exp(-dx*dx*5.0);  // soft edges
+      const a=va*ha, idx=(y*w+x)*4; img.data[idx]=255; img.data[idx+1]=206; img.data[idx+2]=132; img.data[idx+3]=Math.floor(a*255); } }
+  g.putImageData(img,0,0); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
 }
 
 // ---------- sky banner ----------
@@ -301,34 +311,41 @@ function animateOcean(t) {
 }
 
 // ---------- supporters: warm planted lights that brighten the lonely island ----------
-// INTERIM: trypophobic dot-carpet removed. A few soft drifting lanterns as placeholder
-// while we pick the real treatment (beams / lanterns / glow-from-within — see proposal).
+// supporters as BEAMS OF LIGHT rising into the night sky (vertical — never round-dot trypophobia)
 function seedSupporters(n, geo, lift) {
-  lanterns = new THREE.Group(); scene.add(lanterns);
-  lightSprites = new THREE.Group(); scene.add(lightSprites);
+  const g = new THREE.PlaneGeometry(1, 1); g.translate(0, 0.5, 0);     // pivot at the base
+  const m = new THREE.MeshBasicMaterial({ map: beamTex, color: 0xffc274, transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+  beams = new THREE.InstancedMesh(g, m, BEAM_CAP);
+  beams.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   const pos = geo.attributes.position; const above = [];
   for (let i=0;i<pos.count;i++){ if (pos.getY(i) > seaY + 0.5) above.push(i); }
-  for (let i=0;i<14;i++){ const idx = above.length ? above[(Math.random()*above.length)|0] : 0;
-    addLantern(pos.getX(idx), pos.getY(idx)+lift, pos.getZ(idx)); }
-  supporterCount = n; updateCounter();
-}
-function addLantern(x, baseY, z) {
-  const m = new THREE.SpriteMaterial({ map: glowTex, color: 0xffb45a, transparent:true, opacity:0.55,
-    depthWrite:false, blending: THREE.AdditiveBlending, fog:false });
-  const s = new THREE.Sprite(m); const sc = 2.2 + Math.random()*2.6; s.scale.set(sc, sc, 1);
-  s.position.set(x, baseY + 2.5 + Math.random()*4, z);
-  s.userData = { x, z, baseY: baseY + 2.5, t: Math.random()*6.28, sway: 0.6 + Math.random()*0.9 };
-  lanterns.add(s);
-}
-function animateLanterns(dt) {
-  if (lanterns) for (const s of lanterns.children) { s.userData.t += dt; const ph = s.userData.t;
-    s.position.y = s.userData.baseY + Math.sin(ph*0.5)*1.2;
-    s.position.x = s.userData.x + Math.sin(ph*0.3)*s.userData.sway;
-    s.material.opacity = 0.42 + Math.sin(ph*1.1)*0.18; }
+  const START = 260;
+  for (let i=0;i<START;i++){ const idx = above.length ? above[(Math.random()*above.length)|0] : 0;
+    beamData.push({ x: pos.getX(idx), z: pos.getZ(idx), baseY: pos.getY(idx)+lift,
+      height: 4 + Math.random()*6, width: 0.5 + Math.random()*0.35, t: Math.random()*6.28 }); }
+  beams.count = START; scene.add(beams);
+  supporterCount = START; updateCounter();
 }
 function plantLight(p) {
-  addLantern(p.x, p.y, p.z);
+  if (beamData.length < BEAM_CAP) {
+    beamData.push({ x: p.x, z: p.z, baseY: p.y, height: 9, width: 0.85, t: Math.random()*6.28 });  // "my" beam — taller
+    beams.count = beamData.length;
+  }
   supporterCount++; updateCounter();
+}
+const _bm = new THREE.Matrix4(), _bq = new THREE.Quaternion(), _be = new THREE.Euler(), _bp = new THREE.Vector3(), _bs = new THREE.Vector3();
+function updateBeams() {
+  if (!beams) return; const et = clock.elapsedTime;
+  for (let i=0;i<beams.count;i++){
+    const b = beamData[i];
+    const ang = Math.atan2(camera.position.x - b.x, camera.position.z - b.z);   // cylindrical billboard (stays world-vertical)
+    _be.set(0, ang, 0); _bq.setFromEuler(_be);
+    const flick = 1 + Math.sin((et + b.t)*2.2)*0.12;
+    _bp.set(b.x, b.baseY, b.z); _bs.set(b.width, b.height*flick, 1);
+    _bm.compose(_bp, _bq, _bs); beams.setMatrixAt(i, _bm);
+  }
+  beams.instanceMatrix.needsUpdate = true;
 }
 function updateCounter() {
   document.getElementById('counter').textContent = '🔥 ' + supporterCount.toLocaleString() + '명이 독도를 밝혔습니다 · 목표 35,000';
@@ -411,7 +428,7 @@ function animate(){
   snowCover += (snowTarget - snowCover) * Math.min(1, dt*0.6);
   if (island && Math.abs(snowCover - snowApplied) > 0.01){ applySnow(island.geometry, snowCover); snowApplied = snowCover; }
 
-  animateLanterns(dt);
+  updateBeams();
 
   composer.render();
 
