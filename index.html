@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>독도 · 클레이 프로토타입</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet" />
+<style>
+  :root { --ink:#1e2a32; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'Pretendard', sans-serif; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  .title {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    color: var(--ink); font-weight: 700; font-size: 15px; letter-spacing: -0.2px;
+    background: rgba(255,255,255,0.6); backdrop-filter: blur(10px);
+    padding: 8px 16px; border-radius: 999px; z-index: 10;
+    box-shadow: 0 2px 14px rgba(40,60,80,0.10);
+  }
+  .hint {
+    position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
+    color: var(--ink); opacity: .68; font-size: 12.5px; font-weight: 500;
+    z-index: 10; transition: opacity .4s; text-align: center; width: 90%;
+  }
+
+  .dock {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 10; flex-wrap: wrap; justify-content: center;
+    width: max-content; max-width: 94vw;
+  }
+  .pill {
+    border: none; cursor: pointer; font-family: inherit; font-weight: 600;
+    font-size: 14px; color: var(--ink); padding: 11px 16px; border-radius: 999px;
+    background: rgba(255,255,255,0.72); backdrop-filter: blur(12px);
+    box-shadow: 0 3px 16px rgba(40,60,80,0.12); transition: transform .12s, background .2s;
+    white-space: nowrap;
+  }
+  .pill:active { transform: scale(0.94); }
+  .pill.on { background: var(--ink); color: #fff; }
+
+  .loader {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 14px; background: #cfe8f2; z-index: 50;
+    color: var(--ink); font-weight: 600; transition: opacity .6s; font-size: 14px;
+  }
+  .spinner {
+    width: 34px; height: 34px; border: 3px solid rgba(30,42,50,.18);
+    border-top-color: var(--ink); border-radius: 50%; animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .fps {
+    position: fixed; left: 12px; bottom: 22px; z-index: 10; font-size: 11px;
+    color: var(--ink); opacity: .5; font-variant-numeric: tabular-nums;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="title">독도 · 클레이 프로토타입</div>
+<div class="hint" id="hint">독도를 탭하면 그 자리로 빨려 들어갑니다 ✨</div>
+
+<div class="dock">
+  <button class="pill on" data-w="clear">☀️ 맑음</button>
+  <button class="pill" data-w="rain">🌧️ 비</button>
+  <button class="pill" data-w="snow">❄️ 눈</button>
+  <button class="pill" id="styleBtn">🧱 로우폴리</button>
+  <button class="pill" id="resetBtn">↺ 전체</button>
+</div>
+<div class="fps" id="fps"></div>
+
+<div class="loader" id="loader"><div class="spinner"></div><div>독도를 빚는 중…</div></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const SKY = { clear: 0xbfe6f2, rain: 0x9fb2bf, snow: 0xdde8ef };
+
+let renderer, scene, camera, controls, composer;
+let islandSmooth, islandLow, island, sea, lightGroup;
+let raindrops, snowflakes;
+let weather = 'clear';
+let lowpoly = false;
+const clock = new THREE.Clock();
+
+// camera fly-to state
+let flying = false, flyT = 0, flyDur = 1.4;
+const flyFrom = new THREE.Vector3(), flyTo = new THREE.Vector3();
+const tgtFrom = new THREE.Vector3(), tgtTo = new THREE.Vector3();
+
+const HOME_CAM = new THREE.Vector3(0, 42, 62);
+const HOME_TGT = new THREE.Vector3(0, 0, 0);
+
+init();
+
+function init() {
+  const app = document.getElementById('app');
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  app.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(SKY.clear);
+  scene.fog = new THREE.Fog(SKY.clear, 90, 200);
+
+  // soft GI for that premium clay look
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+  camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 600);
+  camera.position.copy(HOME_CAM);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 14;
+  controls.maxDistance = 120;
+  controls.maxPolarAngle = Math.PI / 2.05;
+  controls.target.copy(HOME_TGT);
+
+  // soft key light + sky fill
+  const key = new THREE.DirectionalLight(0xfff4e0, 1.5);
+  key.position.set(40, 70, 30);
+  scene.add(key);
+  scene.add(new THREE.HemisphereLight(0xcfeafe, 0x8fae9a, 0.7));
+
+  // postprocessing — gentle bloom so the supporter lights glow
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.5, 0.92);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
+  lightGroup = new THREE.Group();
+  scene.add(lightGroup);
+
+  loadIsland();
+
+  // events
+  renderer.domElement.addEventListener('pointerdown', onTap);
+  window.addEventListener('resize', onResize);
+  document.querySelectorAll('[data-w]').forEach(b =>
+    b.addEventListener('click', () => setWeather(b.dataset.w)));
+  document.getElementById('styleBtn').addEventListener('click', toggleStyle);
+  document.getElementById('resetBtn').addEventListener('click', flyHome);
+}
+
+// ---- palette: pastel cartoon banding by height ----
+function paletteColor(t) {
+  // t: 0 (sea level) .. 1 (peak). quantize into bands.
+  const bands = [
+    [0.00, 0x9bdcc0], // shoreline teal-green
+    [0.30, 0x86cf9b], // green
+    [0.55, 0xbfce86], // light grass
+    [0.74, 0xd9c3a0], // warm rock
+    [0.88, 0xefeadd], // pale cap
+  ];
+  let c = bands[0][1];
+  for (const [edge, col] of bands) { if (t >= edge) c = col; }
+  return new THREE.Color(c);
+}
+
+function colorByHeight(geo) {
+  const pos = geo.attributes.position;
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < pos.count; i++) { const y = pos.getY(i); if (y < minY) minY = y; if (y > maxY) maxY = y; }
+  const span = (maxY - minY) || 1;
+  const cols = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) - minY) / span;
+    const c = paletteColor(t);
+    cols[i*3] = c.r; cols[i*3+1] = c.g; cols[i*3+2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  return { minY, maxY };
+}
+
+function loadIsland() {
+  new STLLoader().load('Dokdo_Korea.stl', (raw) => {
+    raw.rotateX(-Math.PI / 2);
+    raw.center();
+
+    // normalize scale to ~46 units
+    raw.computeBoundingBox();
+    const size = new THREE.Vector3(); raw.boundingBox.getSize(size);
+    const s = 46 / Math.max(size.x, size.y, size.z);
+    raw.scale(s, s, s);
+
+    // weld duplicate verts -> indexed geometry (needed for clean normals + simplify)
+    let merged;
+    try { merged = mergeVertices(raw, 1e-3); } catch (e) { merged = raw; }
+
+    // SMOOTH clay geometry
+    const smoothGeo = merged.clone();
+    smoothGeo.computeVertexNormals();
+    colorByHeight(smoothGeo);
+
+    // LOW-POLY faceted geometry (decimate, fall back gracefully)
+    let lowGeo = null;
+    try {
+      const triCount = (merged.index ? merged.index.count : merged.attributes.position.count) / 3;
+      const vCount = merged.attributes.position.count;
+      const target = Math.floor(vCount * 0.86); // remove ~86% of verts -> chunky facets
+      lowGeo = new SimplifyModifier().modify(merged, target);
+      lowGeo = lowGeo.toNonIndexed();
+      lowGeo.computeVertexNormals();
+      colorByHeight(lowGeo);
+    } catch (e) { console.warn('simplify failed', e); }
+
+    const matSmooth = new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.92, metalness: 0.0, flatShading: false,
+    });
+    const matLow = new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.95, metalness: 0.0, flatShading: true,
+    });
+
+    islandSmooth = new THREE.Mesh(smoothGeo, matSmooth);
+    scene.add(islandSmooth);
+
+    if (lowGeo) { islandLow = new THREE.Mesh(lowGeo, matLow); islandLow.visible = false; scene.add(islandLow); }
+
+    island = islandSmooth;
+
+    // place island so its base sits near y=0
+    smoothGeo.computeBoundingBox();
+    const minY = smoothGeo.boundingBox.min.y;
+    const lift = -minY * 0.55;
+    if (islandSmooth) islandSmooth.position.y = lift;
+    if (islandLow) islandLow.position.y = lift;
+    window.__seaLevel = lift + minY + (smoothGeo.boundingBox.max.y - minY) * 0.16;
+
+    buildSea();
+    seedLights(18);
+
+    // fade out loader
+    const ld = document.getElementById('loader');
+    ld.style.opacity = '0'; setTimeout(() => ld.remove(), 600);
+
+    animate();
+  }, undefined, (err) => {
+    document.getElementById('loader').innerHTML = '<div>STL 로드 실패 😢<br>' + err + '</div>';
+  });
+}
+
+function buildSea() {
+  const geo = new THREE.PlaneGeometry(260, 260, 90, 90);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  const cLow = new THREE.Color(0x3fa9c4), cHigh = new THREE.Color(0xaee6ec);
+  for (let i = 0; i < pos.count; i++) { const c = cLow.clone().lerp(cHigh, 0.5); cols[i*3]=c.r; cols[i*3+1]=c.g; cols[i*3+2]=c.b; }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  geo.userData.base = Float32Array.from(pos.array);
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.0, flatShading: true, transparent: true, opacity: 0.94 });
+  sea = new THREE.Mesh(geo, mat);
+  sea.position.y = window.__seaLevel || 0;
+  scene.add(sea);
+}
+
+function animateSea(t) {
+  if (!sea) return;
+  const pos = sea.geometry.attributes.position;
+  const base = sea.geometry.userData.base;
+  const cLow = new THREE.Color(0x3fa9c4), cHigh = new THREE.Color(0xaee6ec);
+  const cols = sea.geometry.attributes.color;
+  const amp = weather === 'rain' ? 1.5 : 0.7;
+  for (let i = 0; i < pos.count; i++) {
+    const x = base[i*3], z = base[i*3+2];
+    const h = Math.sin(x*0.12 + t*1.1) * 0.5 + Math.cos(z*0.15 + t*0.9) * 0.5;
+    pos.setY(i, h * amp);
+    const k = (h + 1) / 2;
+    const c = cLow.clone().lerp(cHigh, k * 0.9 + 0.05);
+    cols.setXYZ(i, c.r, c.g, c.b);
+  }
+  pos.needsUpdate = true; cols.needsUpdate = true;
+  sea.geometry.computeVertexNormals();
+}
+
+// ---- supporter lights (glowing pins) ----
+function seedLights(n) {
+  for (let i = 0; i < n; i++) {
+    const r = 6 + Math.random() * 14, a = Math.random() * Math.PI * 2;
+    addLight(new THREE.Vector3(Math.cos(a)*r, (window.__seaLevel||0) + 4 + Math.random()*10, Math.sin(a)*r), false);
+  }
+}
+function addLight(p, pop) {
+  const hue = 0.08 + Math.random() * 0.06;
+  const col = new THREE.Color().setHSL(hue, 0.95, 0.6);
+  const g = new THREE.Group();
+  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 16),
+    new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 3.2, roughness: 0.4 }));
+  g.add(orb);
+  const halo = new THREE.PointLight(col, 6, 14, 2);
+  g.add(halo);
+  g.position.copy(p);
+  g.userData = { t: Math.random()*6.28, pop: pop ? 0 : 1 };
+  lightGroup.add(g);
+}
+
+// ---- interaction: tap island -> fly to point + plant a light ----
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+let downX=0, downY=0;
+function onTap(e) { downX = e.clientX; downY = e.clientY;
+  renderer.domElement.addEventListener('pointerup', onUp, { once: true }); }
+function onUp(e) {
+  if (Math.hypot(e.clientX-downX, e.clientY-downY) > 8) return; // was a drag, not a tap
+  if (!island || flying) return;
+  ndc.x = (e.clientX / window.innerWidth) * 2 - 1;
+  ndc.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObject(island, true)[0];
+  if (!hit) return;
+  const p = hit.point.clone();
+  addLight(p.clone().add(new THREE.Vector3(0, 0.6, 0)), true);
+  // fly: camera swoops to a close orbit around the point (google-earth feel)
+  flyFrom.copy(camera.position); tgtFrom.copy(controls.target);
+  tgtTo.copy(p);
+  const dir = new THREE.Vector3().subVectors(camera.position, p).normalize();
+  flyTo.copy(p).add(dir.multiplyScalar(20)).add(new THREE.Vector3(0, 7, 0));
+  flying = true; flyT = 0;
+  const hint = document.getElementById('hint'); hint.style.opacity = '0';
+}
+function flyHome() {
+  flyFrom.copy(camera.position); tgtFrom.copy(controls.target);
+  flyTo.copy(HOME_CAM); tgtTo.copy(HOME_TGT); flying = true; flyT = 0;
+}
+const easeInOut = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+
+function setWeather(w) {
+  weather = w;
+  document.querySelectorAll('[data-w]').forEach(b => b.classList.toggle('on', b.dataset.w === w));
+  const col = new THREE.Color(SKY[w]);
+  scene.background = col; scene.fog.color = col;
+  if (raindrops) raindrops.visible = (w === 'rain');
+  if (snowflakes) snowflakes.visible = (w === 'snow');
+  if (w === 'rain' && !raindrops) makeRain();
+  if (w === 'snow' && !snowflakes) makeSnow();
+  if (w === 'rain' && raindrops) { raindrops.visible = true; if(!snowflakes===false) snowflakes.visible=false; }
+}
+
+function makeRain() {
+  const N = 1400, g = new THREE.BufferGeometry(), p = new Float32Array(N*3);
+  for (let i=0;i<N;i++){ p[i*3]=(Math.random()-0.5)*120; p[i*3+1]=Math.random()*90; p[i*3+2]=(Math.random()-0.5)*120; }
+  g.setAttribute('position', new THREE.BufferAttribute(p,3));
+  raindrops = new THREE.Points(g, new THREE.PointsMaterial({ color:0xbfe2ff, size:0.5, transparent:true, opacity:0.7 }));
+  raindrops.visible = (weather==='rain'); scene.add(raindrops);
+}
+function makeSnow() {
+  const N = 900, g = new THREE.BufferGeometry(), p = new Float32Array(N*3);
+  for (let i=0;i<N;i++){ p[i*3]=(Math.random()-0.5)*120; p[i*3+1]=Math.random()*90; p[i*3+2]=(Math.random()-0.5)*120; }
+  g.setAttribute('position', new THREE.BufferAttribute(p,3));
+  snowflakes = new THREE.Points(g, new THREE.PointsMaterial({ color:0xffffff, size:0.9, transparent:true, opacity:0.92 }));
+  snowflakes.visible = (weather==='snow'); scene.add(snowflakes);
+}
+function fall(points, speed, drift) {
+  if (!points || !points.visible) return;
+  const a = points.geometry.attributes.position.array;
+  for (let i=0;i<a.length;i+=3){ a[i+1]-=speed; if(drift)a[i]+=Math.sin(performance.now()*0.001+i)*0.02; if(a[i+1]<0)a[i+1]=90; }
+  points.geometry.attributes.position.needsUpdate = true;
+}
+
+function toggleStyle() {
+  if (!islandLow) { document.getElementById('styleBtn').textContent = '🧱 (생성 실패)'; return; }
+  lowpoly = !lowpoly;
+  islandSmooth.visible = !lowpoly;
+  islandLow.visible = lowpoly;
+  island = lowpoly ? islandLow : islandSmooth;
+  document.getElementById('styleBtn').textContent = lowpoly ? '🟢 스무스' : '🧱 로우폴리';
+  document.getElementById('styleBtn').classList.toggle('on', lowpoly);
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+}
+
+let fpsT = 0, frames = 0, lastFps = performance.now();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta(), t = clock.elapsedTime;
+
+  if (flying) {
+    flyT += dt / flyDur;
+    const k = easeInOut(Math.min(flyT, 1));
+    camera.position.lerpVectors(flyFrom, flyTo, k);
+    controls.target.lerpVectors(tgtFrom, tgtTo, k);
+    if (flyT >= 1) flying = false;
+  }
+  controls.update();
+
+  animateSea(t);
+  fall(raindrops, 1.4, false);
+  fall(snowflakes, 0.35, true);
+
+  // pulse the lights
+  lightGroup.children.forEach(g => {
+    g.userData.t += dt * 2.5;
+    if (g.userData.pop < 1) { g.userData.pop = Math.min(1, g.userData.pop + dt*2.2); g.scale.setScalar(g.userData.pop * (1.1)); }
+    const orb = g.children[0];
+    orb.material.emissiveIntensity = 2.6 + Math.sin(g.userData.t)*0.8;
+  });
+
+  composer.render();
+
+  // fps meter
+  frames++; const now = performance.now();
+  if (now - lastFps > 500) { lastFps = now; const f = Math.round(frames*1000/500); frames=0;
+    document.getElementById('fps').textContent = f + ' fps · ' + lightGroup.children.length + ' lights'; }
+}
+</script>
+</body>
+</html>
