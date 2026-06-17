@@ -78,7 +78,7 @@ const SKY = { clear: 0xbfe6f2, rain: 0x9aa9b4, snow: 0xd7e2ea };
 
 let renderer, scene, camera, controls, composer;
 let islandSmooth, islandLow, island;
-let ocean, seededLights, lightSprites;
+let ocean, seabed, seededLights, lightSprites;
 const fishList = [], clouds = [];
 let raindrops, snowflakes, skyText;
 let weather = 'clear', lowpoly = false;
@@ -109,7 +109,7 @@ function init() {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(SKY.clear);
-  scene.fog = new THREE.Fog(SKY.clear, 90, 340);
+  scene.fog = new THREE.Fog(SKY.clear, 70, 300);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -177,8 +177,8 @@ function addSkyText() {
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false });
   skyText = new THREE.Sprite(mat);
-  skyText.scale.set(64, 16, 1);
-  skyText.position.set(0, 34, -6);
+  skyText.scale.set(56, 14, 1);
+  skyText.position.set(0, 23, -34);
   scene.add(skyText);
 }
 
@@ -259,6 +259,7 @@ function loadIsland() {
     islandSmooth.position.y = lift; if (islandLow) islandLow.position.y = lift;
     seaLevelWorld = lift + seaY;
 
+    buildSeabed();
     buildOcean();
     buildFish();
     seedSupporters(800, smoothGeo, lift);
@@ -266,6 +267,25 @@ function loadIsland() {
     const ld = document.getElementById('loader'); ld.style.opacity='0'; setTimeout(()=>ld.remove(),600);
     animate();
   }, undefined, (err) => { document.getElementById('loader').innerHTML = '<div>STL 로드 실패 😢<br>'+err+'</div>'; });
+}
+
+// ---------- seabed: large organic sandy bowl (edges hidden in fog, no hard plate) ----------
+function buildSeabed() {
+  const geo = new THREE.PlaneGeometry(560, 560, 96, 96); geo.rotateX(-Math.PI/2);
+  const pos = geo.attributes.position; const cols = new Float32Array(pos.count*3);
+  const cSand = new THREE.Color(0xe2cfa0), cDeep = new THREE.Color(0x355a66);
+  for (let i=0;i<pos.count;i++){
+    const x=pos.getX(i), z=pos.getZ(i), r=Math.hypot(x,z);
+    const depth = 8 + Math.min(1, r/240)*16;                       // shallow under island -> deep outward
+    const bump = Math.sin(x*0.05)*Math.cos(z*0.05)*1.4 + Math.sin(x*0.13+z*0.1)*0.6;
+    pos.setY(i, -depth + bump);
+    const k = Math.min(1, r/200); const c = cSand.clone().lerp(cDeep, k);
+    cols[i*3]=c.r; cols[i*3+1]=c.g; cols[i*3+2]=c.b;
+  }
+  pos.needsUpdate = true; geo.computeVertexNormals();
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
+  const mat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:1, metalness:0, flatShading:true });
+  seabed = new THREE.Mesh(geo, mat); seabed.position.y = seaLevelWorld; scene.add(seabed);
 }
 
 // ---------- ocean: big, reaches horizon, GENTLE ripples (no plate) ----------
