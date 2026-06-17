@@ -80,7 +80,7 @@ const NIGHT_SKY = 0x27314a;
 
 let renderer, scene, camera, controls, composer;
 let islandSmooth, islandLow, island;
-let ocean, trees, treeGlow, keyLight, hemiLight;
+let ocean, trunks, foliage, keyLight, hemiLight;
 let night = false, treeCount = 0;
 const clouds = [];
 const TREE_CAP = 4000;
@@ -109,6 +109,8 @@ function init() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.95;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   document.getElementById('app').appendChild(renderer.domElement);
 
@@ -129,6 +131,10 @@ function init() {
   controls.target.copy(HOME_TGT);
 
   keyLight = new THREE.DirectionalLight(0xfff2dc, 1.4); keyLight.position.set(35, 65, 25); scene.add(keyLight);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(2048, 2048);
+  const sc = keyLight.shadow.camera; sc.near = 1; sc.far = 220; sc.left = -42; sc.right = 42; sc.top = 42; sc.bottom = -42;
+  keyLight.shadow.bias = -0.0006; keyLight.shadow.normalBias = 0.4;
   hemiLight = new THREE.HemisphereLight(0xcfeafe, 0x88a596, 0.8); scene.add(hemiLight);
 
   composer = new EffectComposer(renderer);
@@ -166,21 +172,14 @@ function makeCloudTexture() {
     g.fillStyle=grd; g.beginPath(); g.arc(x,y,r,0,7); g.fill(); }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-// low-poly tree: trunk + 2 cone canopies, vertex-coloured so one material shows both
-function paintGeo(geo, color) {
-  geo.deleteAttribute('uv');
-  const n = geo.attributes.position.count, a = new Float32Array(n*3);
-  for (let i=0;i<n;i++){ a[i*3]=color.r; a[i*3+1]=color.g; a[i*3+2]=color.b; }
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(a,3)); return geo;
-}
-function makeTreeGeometry() {
-  const trunk = new THREE.CylinderGeometry(0.1, 0.16, 0.9, 5); trunk.translate(0, 0.45, 0);
-  const f1 = new THREE.ConeGeometry(0.72, 1.2, 7);  f1.translate(0, 1.3, 0);
-  const f2 = new THREE.ConeGeometry(0.5, 0.95, 7);  f2.translate(0, 1.95, 0);
-  paintGeo(trunk, new THREE.Color(0x6b4a2f));
-  paintGeo(f1, new THREE.Color(0x3f8a4a));
-  paintGeo(f2, new THREE.Color(0x4f9a55));
-  const g = mergeGeometries([trunk, f1, f2], false); g.computeVertexNormals(); return g;
+// tiny cute low-poly tree = short trunk + faceted foliage ball (separate so foliage can glow at night)
+function makeTrunkGeo() { const g = new THREE.CylinderGeometry(0.055, 0.085, 0.42, 5); g.translate(0, 0.21, 0); return g; }
+function makeFoliageGeo() { const g = new THREE.IcosahedronGeometry(0.4, 0); g.translate(0, 0.68, 0); return g; }
+function makeCloudGeo() {
+  const parts = []; const n = 3 + Math.floor(Math.random()*3);
+  for (let i=0;i<n;i++){ const r = 2 + Math.random()*2.6; const g = new THREE.IcosahedronGeometry(r, 0);
+    g.translate((Math.random()-0.5)*6, (Math.random()-0.5)*1.6, (Math.random()-0.5)*3.5); parts.push(g); }
+  const m = mergeGeometries(parts, false); m.computeVertexNormals(); return m;
 }
 
 // ---------- sky banner ----------
@@ -211,15 +210,15 @@ function addSkyText() {
   scene.add(skyText);
 }
 
-// ---------- clouds ----------
+// ---------- clouds: cute faceted low-poly puffs (like the reference) ----------
 function addClouds() {
-  for (let i=0;i<6;i++){
-    const m = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.22, depthWrite: false, fog: false });
-    const s = new THREE.Sprite(m);
-    const sc = 20 + Math.random()*20; s.scale.set(sc, sc*0.55, 1);
-    s.position.set((Math.random()-0.5)*240, 52 + Math.random()*28, (Math.random()-0.5)*180);   // high up, won't wash the hero view
-    s.userData.spd = 0.5 + Math.random()*0.9;
-    scene.add(s); clouds.push(s);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 1, metalness: 0, fog: false });
+  for (let i=0;i<7;i++){
+    const c = new THREE.Mesh(makeCloudGeo(), mat);
+    const s = 0.8 + Math.random()*0.7; c.scale.set(s, s*0.7, s);
+    c.position.set((Math.random()-0.5)*230, 34 + Math.random()*24, (Math.random()-0.5)*170);
+    c.userData.spd = 0.5 + Math.random()*0.8;
+    scene.add(c); clouds.push(c);
   }
 }
 
@@ -280,8 +279,8 @@ function loadIsland() {
 
     const matS = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.92, metalness:0, flatShading:false, envMapIntensity:0.4 });
     const matL = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.95, metalness:0, flatShading:true,  envMapIntensity:0.4 });
-    islandSmooth = new THREE.Mesh(smoothGeo, matS); scene.add(islandSmooth);
-    if (lowGeo) { islandLow = new THREE.Mesh(lowGeo, matL); islandLow.visible=false; scene.add(islandLow); }
+    islandSmooth = new THREE.Mesh(smoothGeo, matS); islandSmooth.castShadow = true; islandSmooth.receiveShadow = true; scene.add(islandSmooth);
+    if (lowGeo) { islandLow = new THREE.Mesh(lowGeo, matL); islandLow.visible=false; islandLow.castShadow = true; islandLow.receiveShadow = true; scene.add(islandLow); }
     island = islandSmooth;
 
     const lift = -gMinY * 0.55;
@@ -321,22 +320,20 @@ function animateOcean(t) {
   pos.needsUpdate = true; cols.needsUpdate = true; ocean.geometry.computeVertexNormals();
 }
 
-// ---------- supporters = TREES planted on Dokdo (day: green detail · night: glowing illumination) ----------
+// ---------- supporters = tiny TREES (day: green forest · night: the FOLIAGE itself glows) ----------
+let folMat;
 function seedSupporters(n, geo, lift) {
-  const tg = makeTreeGeometry();
-  const tm = new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:true, roughness:0.85, metalness:0, emissive:0x000000, envMapIntensity:0.35 });
-  trees = new THREE.InstancedMesh(tg, tm, TREE_CAP);
-  trees.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  scene.add(trees);
-  // warm tree-top glow points (illumination) — invisible by day, lit at night
-  const gp = new THREE.BufferGeometry(); gp.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TREE_CAP*3), 3));
-  const gm = new THREE.PointsMaterial({ map: glowTex, color: 0xffd27a, size: 1.1, sizeAttenuation: true,
-    transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
-  treeGlow = new THREE.Points(gp, gm); treeGlow.geometry.setDrawRange(0, 0); scene.add(treeGlow);
+  const trunkMat = new THREE.MeshStandardMaterial({ color:0x6f4a2c, flatShading:true, roughness:0.9, metalness:0 });
+  folMat = new THREE.MeshStandardMaterial({ color:0x4f9a45, flatShading:true, roughness:0.8, metalness:0, emissive:0x000000, emissiveIntensity:0, envMapIntensity:0.3 });
+  trunks = new THREE.InstancedMesh(makeTrunkGeo(), trunkMat, TREE_CAP);
+  foliage = new THREE.InstancedMesh(makeFoliageGeo(), folMat, TREE_CAP);
+  trunks.instanceMatrix.setUsage(THREE.DynamicDrawUsage); foliage.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  trunks.castShadow = true; foliage.castShadow = true; foliage.receiveShadow = true;
+  scene.add(trunks); scene.add(foliage);
 
   const pos = geo.attributes.position; const above = [];
   for (let i=0;i<pos.count;i++){ if (pos.getY(i) > seaY + 0.5) above.push(i); }
-  const START = 360;
+  const START = 1200;
   for (let i=0;i<START;i++){ const idx = above.length ? above[(Math.random()*above.length)|0] : 0;
     plantTree(pos.getX(idx), pos.getY(idx)+lift, pos.getZ(idx)); }
   supporterCount = START; updateCounter();
@@ -344,14 +341,13 @@ function seedSupporters(n, geo, lift) {
 const _tm4 = new THREE.Matrix4(), _tq = new THREE.Quaternion(), _te = new THREE.Euler(), _tp = new THREE.Vector3(), _ts = new THREE.Vector3();
 function plantTree(x, baseY, z) {
   if (treeCount >= TREE_CAP) return;
-  const s = 0.55 + Math.random()*0.95, ry = Math.random()*6.28;
+  const s = 0.5 + Math.random()*0.5, ry = Math.random()*6.28;     // tiny trees on the big island
   _te.set(0, ry, 0); _tq.setFromEuler(_te); _tp.set(x, baseY, z); _ts.set(s, s, s);
-  _tm4.compose(_tp, _tq, _ts); trees.setMatrixAt(treeCount, _tm4);
-  const arr = treeGlow.geometry.attributes.position.array;
-  arr[treeCount*3]=x; arr[treeCount*3+1]=baseY + 2.35*s; arr[treeCount*3+2]=z;
+  _tm4.compose(_tp, _tq, _ts);
+  trunks.setMatrixAt(treeCount, _tm4); foliage.setMatrixAt(treeCount, _tm4);
   treeCount++;
-  trees.count = treeCount; trees.instanceMatrix.needsUpdate = true;
-  treeGlow.geometry.setDrawRange(0, treeCount); treeGlow.geometry.attributes.position.needsUpdate = true;
+  trunks.count = treeCount; foliage.count = treeCount;
+  trunks.instanceMatrix.needsUpdate = true; foliage.instanceMatrix.needsUpdate = true;
 }
 function plantLight(p) { plantTree(p.x, p.y, p.z); supporterCount++; updateCounter(); }
 
@@ -364,8 +360,7 @@ function setNight(on) {
   keyLight.intensity = on ? 0.5 : 1.4;
   hemiLight.intensity = on ? 0.38 : 0.8;
   if (on) { seaLow.set(0x16334a); seaHigh.set(0x2b5870); } else { seaLow.set(0x2e7da0); seaHigh.set(0x6fc3d6); }
-  if (treeGlow) treeGlow.material.opacity = on ? 0.95 : 0.0;
-  if (trees) trees.material.emissive.set(on ? 0x241a08 : 0x000000);
+  if (folMat) { folMat.emissive.set(on ? 0x9ad24a : 0x000000); folMat.emissiveIntensity = on ? 1.15 : 0; }
   const b = document.getElementById('nightBtn');
   b.classList.toggle('on', on); b.textContent = on ? '☀️ 낮' : '🌙 밤';
   applySky();
@@ -451,7 +446,6 @@ function animate(){
   snowCover += (snowTarget - snowCover) * Math.min(1, dt*0.6);
   if (island && Math.abs(snowCover - snowApplied) > 0.01){ applySnow(island.geometry, snowCover); snowApplied = snowCover; }
 
-  if (treeGlow && night) treeGlow.material.size = 1.0 + Math.sin(t*2.2)*0.18;
 
   composer.render();
 
