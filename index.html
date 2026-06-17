@@ -74,12 +74,12 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-const SKY = { clear: 0xbfe6f2, rain: 0x9aa9b4, snow: 0xd7e2ea };
+const SKY = { clear: 0x4d5f82, rain: 0x38424f, snow: 0x8896ad };   // dusk / blue-hour mood
 
 let renderer, scene, camera, controls, composer;
 let islandSmooth, islandLow, island;
-let ocean, seabed, seededLights, lightSprites;
-const fishList = [], clouds = [];
+let ocean, seededLights, lightSprites;
+const clouds = [];
 let raindrops, snowflakes, skyText;
 let weather = 'clear', lowpoly = false;
 let snowCover = 0, snowTarget = 0, snowApplied = -1;
@@ -103,7 +103,7 @@ function init() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.9;
+  renderer.toneMappingExposure = 0.86;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   document.getElementById('app').appendChild(renderer.domElement);
 
@@ -123,13 +123,13 @@ function init() {
   controls.maxPolarAngle = Math.PI / 2.5;   // keep a diorama angle — never fully horizontal (water grazes low islands)
   controls.target.copy(HOME_TGT);
 
-  const key = new THREE.DirectionalLight(0xfff4e0, 1.5); key.position.set(40, 70, 30); scene.add(key);
-  scene.add(new THREE.HemisphereLight(0xcfeafe, 0x88a596, 0.75));
+  const key = new THREE.DirectionalLight(0xffd2a6, 0.95); key.position.set(30, 60, 20); scene.add(key);
+  scene.add(new THREE.HemisphereLight(0x5a6e92, 0x2a3340, 0.5));
 
   composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
   // subtle bloom — small light dots twinkle, scene not blown out
-  composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.32, 0.6, 0.95));
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.75, 0.72));
   composer.addPass(new OutputPass());
 
   addSkyText();
@@ -185,7 +185,7 @@ function addSkyText() {
 // ---------- clouds ----------
 function addClouds() {
   for (let i=0;i<11;i++){
-    const m = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.85, depthWrite: false, fog: false });
+    const m = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.45, depthWrite: false, fog: false });
     const s = new THREE.Sprite(m);
     const sc = 22 + Math.random()*26; s.scale.set(sc, sc*0.6, 1);
     s.position.set((Math.random()-0.5)*220, 24 + Math.random()*22, (Math.random()-0.5)*160);
@@ -249,8 +249,8 @@ function loadIsland() {
       colorIsland(lowGeo, seaY);
     } catch(e){ console.warn('simplify failed', e); }
 
-    const matS = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.92, metalness:0, flatShading:false, envMapIntensity:0.45 });
-    const matL = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.95, metalness:0, flatShading:true,  envMapIntensity:0.45 });
+    const matS = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.92, metalness:0, flatShading:false, envMapIntensity:0.28 });
+    const matL = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.95, metalness:0, flatShading:true,  envMapIntensity:0.28 });
     islandSmooth = new THREE.Mesh(smoothGeo, matS); scene.add(islandSmooth);
     if (lowGeo) { islandLow = new THREE.Mesh(lowGeo, matL); islandLow.visible=false; scene.add(islandLow); }
     island = islandSmooth;
@@ -259,9 +259,7 @@ function loadIsland() {
     islandSmooth.position.y = lift; if (islandLow) islandLow.position.y = lift;
     seaLevelWorld = lift + seaY;
 
-    buildSeabed();
     buildOcean();
-    buildFish();
     seedSupporters(800, smoothGeo, lift);
 
     const ld = document.getElementById('loader'); ld.style.opacity='0'; setTimeout(()=>ld.remove(),600);
@@ -269,43 +267,22 @@ function loadIsland() {
   }, undefined, (err) => { document.getElementById('loader').innerHTML = '<div>STL 로드 실패 😢<br>'+err+'</div>'; });
 }
 
-// ---------- seabed: large organic sandy bowl (edges hidden in fog, no hard plate) ----------
-function buildSeabed() {
-  const geo = new THREE.PlaneGeometry(1200, 1200, 120, 120); geo.rotateX(-Math.PI/2);
-  const pos = geo.attributes.position; const cols = new Float32Array(pos.count*3);
-  // near-uniform deep seabed (no big bright sand disk) — shoreline sand comes from the island's own underwater base
-  const cShallow = new THREE.Color(0x4a8290), cDeep = new THREE.Color(0x3a6573);
-  for (let i=0;i<pos.count;i++){
-    const x=pos.getX(i), z=pos.getZ(i), r=Math.hypot(x,z);
-    const depth = 8 + Math.min(1, r/300)*18;
-    const bump = Math.sin(x*0.05)*Math.cos(z*0.05)*1.4 + Math.sin(x*0.13+z*0.1)*0.6;
-    pos.setY(i, -depth + bump);
-    const k = Math.min(1, r/120); const c = cShallow.clone().lerp(cDeep, k);
-    cols[i*3]=c.r; cols[i*3+1]=c.g; cols[i*3+2]=c.b;
-  }
-  pos.needsUpdate = true; geo.computeVertexNormals();
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
-  const mat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:1, metalness:0, flatShading:true });
-  seabed = new THREE.Mesh(geo, mat); seabed.position.y = seaLevelWorld; scene.add(seabed);
-}
-
-// ---------- ocean: big, reaches horizon, GENTLE ripples (no plate) ----------
+// ---------- ocean: big OPAQUE sea, reaches horizon, gentle ripples (no floor plate) ----------
 function buildOcean() {
   const geo = new THREE.PlaneGeometry(1200, 1200, 90, 90);
   geo.rotateX(-Math.PI/2);
   const pos = geo.attributes.position; const cols = new Float32Array(pos.count*3);
-  const cLow = new THREE.Color(0x2e93b8), cHigh = new THREE.Color(0x7bd6da);
+  const cLow = new THREE.Color(0x21455e), cHigh = new THREE.Color(0x356f86);
   for (let i=0;i<pos.count;i++){ const c=cLow.clone().lerp(cHigh,0.5); cols[i*3]=c.r;cols[i*3+1]=c.g;cols[i*3+2]=c.b; }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
   geo.userData.base = Float32Array.from(pos.array);
-  const mat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.72, metalness:0, flatShading:true,
-    transparent:true, opacity:0.8, depthWrite:false, envMapIntensity:0.12 });
-  ocean = new THREE.Mesh(geo, mat); ocean.position.y = seaLevelWorld; ocean.renderOrder = 2; scene.add(ocean);
+  const mat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.55, metalness:0, flatShading:true, envMapIntensity:0.18 });
+  ocean = new THREE.Mesh(geo, mat); ocean.position.y = seaLevelWorld; scene.add(ocean);
 }
 function animateOcean(t) {
   if (!ocean) return;
   const pos = ocean.geometry.attributes.position, base = ocean.geometry.userData.base;
-  const cLow = new THREE.Color(0x2e93b8), cHigh = new THREE.Color(0x7bd6da), cols = ocean.geometry.attributes.color, c = new THREE.Color();
+  const cLow = new THREE.Color(0x21455e), cHigh = new THREE.Color(0x356f86), cols = ocean.geometry.attributes.color, c = new THREE.Color();
   const amp = weather==='rain' ? 0.3 : 0.16;                 // tiny ripples — big island scale
   for (let i=0;i<pos.count;i++){
     const x=base[i*3], z=base[i*3+2];
@@ -316,34 +293,7 @@ function animateOcean(t) {
   pos.needsUpdate = true; cols.needsUpdate = true; ocean.geometry.computeVertexNormals();
 }
 
-// ---------- fish (proper little fish, fully underwater) ----------
-function makeFish(color) {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color, roughness:0.5, metalness:0, flatShading:true });
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), mat); body.scale.set(1.5,0.75,0.55);
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.42,0.8,4), mat); tail.rotation.z = Math.PI/2; tail.position.x = -0.95; tail.scale.set(1,1,0.35);
-  g.add(body, tail); return g;
-}
-function buildFish() {
-  const cols = [0xbcd4e0, 0xa9c7d6, 0xe6c9a0, 0xc8d8c0];
-  for (let s=0;s<5;s++){
-    const cx=(Math.random()-0.5)*80, cz=(Math.random()-0.5)*80;
-    const baseY = seaLevelWorld - 2.5 - Math.random()*4;
-    const col = cols[s % cols.length]; const n = 3+Math.floor(Math.random()*3);
-    for (let i=0;i<n;i++){ const m=makeFish(col); m.scale.setScalar(0.7+Math.random()*0.4); scene.add(m);
-      fishList.push({ mesh:m, cx, cz, baseY: baseY+(Math.random()-0.5)*2, radius:5+Math.random()*12, speed:0.2+Math.random()*0.3, phase:Math.random()*6.28 }); }
-  }
-}
-function animateFish(t) {
-  for (const f of fishList) {
-    const a = f.phase + t*f.speed; const x=f.cx+Math.cos(a)*f.radius, z=f.cz+Math.sin(a)*f.radius;
-    const y = Math.min(seaLevelWorld-1.0, f.baseY + Math.sin(t*0.8+f.phase)*0.5);   // keep below surface
-    f.mesh.position.set(x,y,z);
-    f.mesh.lookAt(f.cx+Math.cos(a+0.12)*f.radius, y, f.cz+Math.sin(a+0.12)*f.radius);
-  }
-}
-
-// ---------- supporters: MANY tiny light points (35k-scale density) ----------
+// ---------- supporters: warm planted lights that brighten the lonely island ----------
 function seedSupporters(n, geo, lift) {
   const pos = geo.attributes.position; const above = [];
   for (let i=0;i<pos.count;i++){ if (pos.getY(i) > seaY + 0.3) above.push(i); }
@@ -351,8 +301,8 @@ function seedSupporters(n, geo, lift) {
   for (let i=0;i<n;i++){ const idx = above.length ? above[(Math.random()*above.length)|0] : 0;
     pts[i*3]=pos.getX(idx); pts[i*3+1]=pos.getY(idx)+lift+0.25; pts[i*3+2]=pos.getZ(idx); }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts,3));
-  const m = new THREE.PointsMaterial({ map: glowTex, color: 0xffcf86, size: 0.42, sizeAttenuation: true,
-    transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
+  const m = new THREE.PointsMaterial({ map: glowTex, color: 0xffb45a, size: 0.6, sizeAttenuation: true,
+    transparent: true, opacity: 1.0, depthWrite: false, blending: THREE.AdditiveBlending });
   seededLights = new THREE.Points(g, m); scene.add(seededLights);
   supporterCount = n; updateCounter();
 
@@ -435,7 +385,7 @@ function animate(){
     camera.position.lerpVectors(flyFrom,flyTo,k); controls.target.lerpVectors(tgtFrom,tgtTo,k); if(flyT>=1)flying=false; }
   controls.update();
 
-  animateOcean(t); animateFish(t);
+  animateOcean(t);
   fall(raindrops, 0.9, false); fall(snowflakes, 0.3, true);
 
   // clouds drift
@@ -446,7 +396,7 @@ function animate(){
   if (island && Math.abs(snowCover - snowApplied) > 0.01){ applySnow(island.geometry, snowCover); snowApplied = snowCover; }
 
   // twinkle seeded lights + pop user lights
-  if (seededLights) seededLights.material.size = 0.4 + Math.sin(t*2)*0.06;
+  if (seededLights) seededLights.material.size = 0.55 + Math.sin(t*2)*0.1;
   if (lightSprites) for (const s of lightSprites.children){ if (s.userData.pop<1){ s.userData.pop=Math.min(1,s.userData.pop+dt*2.2); s.scale.setScalar(1.1*s.userData.pop); } }
 
   composer.render();
