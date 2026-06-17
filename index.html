@@ -297,8 +297,8 @@ function buildOcean() {
   for (let i=0;i<pos.count;i++){ const c=cLow.clone().lerp(cHigh,0.5); cols[i*3]=c.r;cols[i*3+1]=c.g;cols[i*3+2]=c.b; }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
   geo.userData.base = Float32Array.from(pos.array);
-  const mat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.35, metalness:0, flatShading:true,
-    transparent:true, opacity:0.72, depthWrite:false, envMapIntensity:0.6 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.72, metalness:0, flatShading:true,
+    transparent:true, opacity:0.78, depthWrite:false, envMapIntensity:0.12 });
   ocean = new THREE.Mesh(geo, mat); ocean.position.y = seaLevelWorld; ocean.renderOrder = 2; scene.add(ocean);
 }
 function animateOcean(t) {
