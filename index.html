@@ -196,7 +196,7 @@ function addClouds() {
 
 // ---------- palette ----------
 function paletteColor(t) {
-  const bands = [[0.00,0x4fb38a],[0.28,0x46a06f],[0.50,0x7f9a4c],[0.70,0xb29360],[0.90,0xe2d8c2]];
+  const bands = [[0.00,0x53b189],[0.30,0x46a06f],[0.54,0x6f9a4c],[0.76,0x97894e],[0.92,0xb29a66]];
   let c = bands[0][1]; for (const [e,col] of bands) if (t>=e) c=col; return new THREE.Color(c);
 }
 function colorIsland(geo, seaYLocal) {
