@@ -273,13 +273,14 @@ function loadIsland() {
 function buildSeabed() {
   const geo = new THREE.PlaneGeometry(1200, 1200, 120, 120); geo.rotateX(-Math.PI/2);
   const pos = geo.attributes.position; const cols = new Float32Array(pos.count*3);
-  const cSand = new THREE.Color(0xe2cfa0), cDeep = new THREE.Color(0x355a66);
+  // near-uniform deep seabed (no big bright sand disk) — shoreline sand comes from the island's own underwater base
+  const cShallow = new THREE.Color(0x4a8290), cDeep = new THREE.Color(0x3a6573);
   for (let i=0;i<pos.count;i++){
     const x=pos.getX(i), z=pos.getZ(i), r=Math.hypot(x,z);
-    const depth = 7 + Math.min(1, r/300)*18;                       // shallow under island -> deep outward (covers far past fog)
+    const depth = 8 + Math.min(1, r/300)*18;
     const bump = Math.sin(x*0.05)*Math.cos(z*0.05)*1.4 + Math.sin(x*0.13+z*0.1)*0.6;
     pos.setY(i, -depth + bump);
-    const k = Math.min(1, r/260); const c = cSand.clone().lerp(cDeep, k);
+    const k = Math.min(1, r/120); const c = cShallow.clone().lerp(cDeep, k);
     cols[i*3]=c.r; cols[i*3+1]=c.g; cols[i*3+2]=c.b;
   }
   pos.needsUpdate = true; geo.computeVertexNormals();
@@ -298,7 +299,7 @@ function buildOcean() {
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
   geo.userData.base = Float32Array.from(pos.array);
   const mat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.72, metalness:0, flatShading:true,
-    transparent:true, opacity:0.78, depthWrite:false, envMapIntensity:0.12 });
+    transparent:true, opacity:0.8, depthWrite:false, envMapIntensity:0.12 });
   ocean = new THREE.Mesh(geo, mat); ocean.position.y = seaLevelWorld; ocean.renderOrder = 2; scene.add(ocean);
 }
 function animateOcean(t) {
