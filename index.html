@@ -91,7 +91,7 @@ let supporterCount = 0;
 // camera fly-to
 let flying = false, flyT = 0; const flyDur = 1.5;
 const flyFrom = new THREE.Vector3(), flyTo = new THREE.Vector3(), tgtFrom = new THREE.Vector3(), tgtTo = new THREE.Vector3();
-const HOME_CAM = new THREE.Vector3(0, 30, 54), HOME_TGT = new THREE.Vector3(0, 0, 0);
+const HOME_CAM = new THREE.Vector3(0, 42, 50), HOME_TGT = new THREE.Vector3(0, 0, 0);
 
 const glowTex = makeGlowTexture();
 const cloudTex = makeCloudTexture();
@@ -120,7 +120,7 @@ function init() {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
   controls.minDistance = 12; controls.maxDistance = 130;
-  controls.maxPolarAngle = Math.PI / 2.06;
+  controls.maxPolarAngle = Math.PI / 2.5;   // keep a diorama angle — never fully horizontal (water grazes low islands)
   controls.target.copy(HOME_TGT);
 
   const key = new THREE.DirectionalLight(0xfff4e0, 1.5); key.position.set(40, 70, 30); scene.add(key);
@@ -177,8 +177,8 @@ function addSkyText() {
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false });
   skyText = new THREE.Sprite(mat);
-  skyText.scale.set(50, 12.5, 1);
-  skyText.position.set(0, 15, -30);
+  skyText.scale.set(46, 11.5, 1);
+  skyText.position.set(0, 26, -46);
   scene.add(skyText);
 }
 
