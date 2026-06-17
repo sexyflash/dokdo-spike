@@ -184,15 +184,15 @@ function addSkyText() {
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false });
   skyText = new THREE.Sprite(mat);
-  skyText.scale.set(44, 44 * H/W, 1);     // keep canvas aspect (no squish)
-  skyText.position.set(0, 21, -6);        // hero banner in the sky, fully inside the default frame
+  skyText.scale.set(50, 50 * H/W, 1);     // keep canvas aspect (no squish)
+  skyText.position.set(0, 13, -2);        // hero banner: open dark sky above the islands, clear of the UI
   scene.add(skyText);
 }
 
 // ---------- clouds ----------
 function addClouds() {
   for (let i=0;i<11;i++){
-    const m = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.45, depthWrite: false, fog: false });
+    const m = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.28, depthWrite: false, fog: false });
     const s = new THREE.Sprite(m);
     const sc = 22 + Math.random()*26; s.scale.set(sc, sc*0.6, 1);
     s.position.set((Math.random()-0.5)*220, 24 + Math.random()*22, (Math.random()-0.5)*160);
