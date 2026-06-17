@@ -201,12 +201,12 @@ function addSkyText() {
 
 // ---------- clouds ----------
 function addClouds() {
-  for (let i=0;i<11;i++){
-    const m = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.28, depthWrite: false, fog: false });
+  for (let i=0;i<6;i++){
+    const m = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.22, depthWrite: false, fog: false });
     const s = new THREE.Sprite(m);
-    const sc = 22 + Math.random()*26; s.scale.set(sc, sc*0.6, 1);
-    s.position.set((Math.random()-0.5)*220, 24 + Math.random()*22, (Math.random()-0.5)*160);
-    s.userData.spd = 0.6 + Math.random()*1.1;
+    const sc = 20 + Math.random()*20; s.scale.set(sc, sc*0.55, 1);
+    s.position.set((Math.random()-0.5)*240, 52 + Math.random()*28, (Math.random()-0.5)*180);   // high up, won't wash the hero view
+    s.userData.spd = 0.5 + Math.random()*0.9;
     scene.add(s); clouds.push(s);
   }
 }
