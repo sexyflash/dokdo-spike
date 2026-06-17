@@ -107,7 +107,7 @@ let flying = false, flyT = 0, flyDur = 1.4;
 const flyFrom = new THREE.Vector3(), flyTo = new THREE.Vector3();
 const tgtFrom = new THREE.Vector3(), tgtTo = new THREE.Vector3();
 
-const HOME_CAM = new THREE.Vector3(0, 42, 62);
+const HOME_CAM = new THREE.Vector3(0, 32, 52);
 const HOME_TGT = new THREE.Vector3(0, 0, 0);
 
 init();
@@ -118,13 +118,13 @@ function init() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 0.92;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   app.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(SKY.clear);
-  scene.fog = new THREE.Fog(SKY.clear, 90, 200);
+  scene.fog = new THREE.Fog(SKY.clear, 95, 260);
 
   // soft GI for that premium clay look
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -150,7 +150,7 @@ function init() {
   // postprocessing — gentle bloom so the supporter lights glow
   composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.5, 0.92);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.6, 0.96);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -172,11 +172,11 @@ function init() {
 function paletteColor(t) {
   // t: 0 (sea level) .. 1 (peak). quantize into bands.
   const bands = [
-    [0.00, 0x9bdcc0], // shoreline teal-green
-    [0.30, 0x86cf9b], // green
-    [0.55, 0xbfce86], // light grass
-    [0.74, 0xd9c3a0], // warm rock
-    [0.88, 0xefeadd], // pale cap
+    [0.00, 0x4fb38a], // shoreline teal-green
+    [0.28, 0x46a06f], // green
+    [0.50, 0x7f9a4c], // olive grass
+    [0.70, 0xb29360], // warm rock
+    [0.88, 0xe2d8c2], // pale cap (small)
   ];
   let c = bands[0][1];
   for (const [edge, col] of bands) { if (t >= edge) c = col; }
@@ -206,7 +206,7 @@ function loadIsland() {
     // normalize scale to ~46 units
     raw.computeBoundingBox();
     const size = new THREE.Vector3(); raw.boundingBox.getSize(size);
-    const s = 46 / Math.max(size.x, size.y, size.z);
+    const s = 54 / Math.max(size.x, size.y, size.z);
     raw.scale(s, s, s);
 
     // weld duplicate verts -> indexed geometry (needed for clean normals + simplify)
@@ -231,10 +231,10 @@ function loadIsland() {
     } catch (e) { console.warn('simplify failed', e); }
 
     const matSmooth = new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.92, metalness: 0.0, flatShading: false,
+      vertexColors: true, roughness: 0.92, metalness: 0.0, flatShading: false, envMapIntensity: 0.45,
     });
     const matLow = new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.95, metalness: 0.0, flatShading: true,
+      vertexColors: true, roughness: 0.95, metalness: 0.0, flatShading: true, envMapIntensity: 0.45,
     });
 
     islandSmooth = new THREE.Mesh(smoothGeo, matSmooth);
@@ -270,11 +270,11 @@ function buildSea() {
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
   const cols = new Float32Array(pos.count * 3);
-  const cLow = new THREE.Color(0x3fa9c4), cHigh = new THREE.Color(0xaee6ec);
+  const cLow = new THREE.Color(0x1f7fa6), cHigh = new THREE.Color(0x5cc6cf);
   for (let i = 0; i < pos.count; i++) { const c = cLow.clone().lerp(cHigh, 0.5); cols[i*3]=c.r; cols[i*3+1]=c.g; cols[i*3+2]=c.b; }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
   geo.userData.base = Float32Array.from(pos.array);
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.0, flatShading: true, transparent: true, opacity: 0.94 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.0, flatShading: true, transparent: true, opacity: 0.97, envMapIntensity: 0.4 });
   sea = new THREE.Mesh(geo, mat);
   sea.position.y = window.__seaLevel || 0;
   scene.add(sea);
@@ -284,7 +284,7 @@ function animateSea(t) {
   if (!sea) return;
   const pos = sea.geometry.attributes.position;
   const base = sea.geometry.userData.base;
-  const cLow = new THREE.Color(0x3fa9c4), cHigh = new THREE.Color(0xaee6ec);
+  const cLow = new THREE.Color(0x1f7fa6), cHigh = new THREE.Color(0x5cc6cf);
   const cols = sea.geometry.attributes.color;
   const amp = weather === 'rain' ? 1.5 : 0.7;
   for (let i = 0; i < pos.count; i++) {
