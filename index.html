@@ -97,7 +97,8 @@ const SKY = { clear: 0xbfe6f2, rain: 0x9fb2bf, snow: 0xdde8ef };
 
 let renderer, scene, camera, controls, composer;
 let islandSmooth, islandLow, island, sea, lightGroup;
-let raindrops, snowflakes;
+let raindrops, snowflakes, seabed;
+const fishList = [];
 let weather = 'clear';
 let lowpoly = false;
 const clock = new THREE.Clock();
@@ -183,15 +184,22 @@ function paletteColor(t) {
   return new THREE.Color(c);
 }
 
-function colorByHeight(geo) {
+function colorByHeight(geo, seaY) {
   const pos = geo.attributes.position;
   let minY = Infinity, maxY = -Infinity;
   for (let i = 0; i < pos.count; i++) { const y = pos.getY(i); if (y < minY) minY = y; if (y > maxY) maxY = y; }
-  const span = (maxY - minY) || 1;
+  const sand = new THREE.Color(0xe0cb9e), deep = new THREE.Color(0x6f7d6c);
   const cols = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
-    const t = (pos.getY(i) - minY) / span;
-    const c = paletteColor(t);
+    const y = pos.getY(i);
+    let c;
+    if (y < seaY) {                                  // underwater: sandy shallows -> deep rock
+      const d = (seaY - y) / ((seaY - minY) || 1);
+      c = sand.clone().lerp(deep, Math.min(1, d));
+    } else {                                         // above water: green clay bands
+      const t = (y - seaY) / ((maxY - seaY) || 1);
+      c = paletteColor(t);
+    }
     cols[i*3] = c.r; cols[i*3+1] = c.g; cols[i*3+2] = c.b;
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
@@ -213,21 +221,25 @@ function loadIsland() {
     let merged;
     try { merged = mergeVertices(raw, 1e-3); } catch (e) { merged = raw; }
 
+    // local sea level (16% up from the lowest point)
+    merged.computeBoundingBox();
+    const gMinY = merged.boundingBox.min.y, gMaxY = merged.boundingBox.max.y;
+    const seaY = gMinY + (gMaxY - gMinY) * 0.16;
+
     // SMOOTH clay geometry
     const smoothGeo = merged.clone();
     smoothGeo.computeVertexNormals();
-    colorByHeight(smoothGeo);
+    colorByHeight(smoothGeo, seaY);
 
     // LOW-POLY faceted geometry (decimate, fall back gracefully)
     let lowGeo = null;
     try {
-      const triCount = (merged.index ? merged.index.count : merged.attributes.position.count) / 3;
       const vCount = merged.attributes.position.count;
       const target = Math.floor(vCount * 0.86); // remove ~86% of verts -> chunky facets
       lowGeo = new SimplifyModifier().modify(merged, target);
       lowGeo = lowGeo.toNonIndexed();
       lowGeo.computeVertexNormals();
-      colorByHeight(lowGeo);
+      colorByHeight(lowGeo, seaY);
     } catch (e) { console.warn('simplify failed', e); }
 
     const matSmooth = new THREE.MeshStandardMaterial({
@@ -244,16 +256,16 @@ function loadIsland() {
 
     island = islandSmooth;
 
-    // place island so its base sits near y=0
-    smoothGeo.computeBoundingBox();
-    const minY = smoothGeo.boundingBox.min.y;
-    const lift = -minY * 0.55;
+    // place island & sea
+    const lift = -gMinY * 0.55;
     if (islandSmooth) islandSmooth.position.y = lift;
     if (islandLow) islandLow.position.y = lift;
-    window.__seaLevel = lift + minY + (smoothGeo.boundingBox.max.y - minY) * 0.16;
+    window.__seaLevel = lift + seaY;
 
     buildSea();
-    seedLights(18);
+    buildSeabed();
+    buildFish();
+    seedLights(12);
 
     // fade out loader
     const ld = document.getElementById('loader');
@@ -266,18 +278,66 @@ function loadIsland() {
 }
 
 function buildSea() {
-  const geo = new THREE.PlaneGeometry(260, 260, 90, 90);
+  const geo = new THREE.PlaneGeometry(220, 220, 80, 80);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
   const cols = new Float32Array(pos.count * 3);
-  const cLow = new THREE.Color(0x1f7fa6), cHigh = new THREE.Color(0x5cc6cf);
+  const cLow = new THREE.Color(0x2e93b8), cHigh = new THREE.Color(0x7bd6da);
   for (let i = 0; i < pos.count; i++) { const c = cLow.clone().lerp(cHigh, 0.5); cols[i*3]=c.r; cols[i*3+1]=c.g; cols[i*3+2]=c.b; }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
   geo.userData.base = Float32Array.from(pos.array);
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.0, flatShading: true, transparent: true, opacity: 0.97, envMapIntensity: 0.4 });
+  // translucent so the seabed & fish show through (diorama look)
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.0, flatShading: true, transparent: true, opacity: 0.6, depthWrite: false, envMapIntensity: 0.5 });
   sea = new THREE.Mesh(geo, mat);
   sea.position.y = window.__seaLevel || 0;
+  sea.renderOrder = 2;
   scene.add(sea);
+}
+
+function buildSeabed() {
+  const geo = new THREE.PlaneGeometry(230, 230, 48, 48);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  const cShallow = new THREE.Color(0xe6d3a3), cDeep = new THREE.Color(0x86916f);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), r = Math.hypot(x, z);
+    pos.setY(i, Math.sin(x*0.14)*Math.cos(z*0.14)*0.9);       // gentle sand dunes
+    const k = Math.min(1, r / 95);
+    const c = cShallow.clone().lerp(cDeep, k);
+    cols[i*3]=c.r; cols[i*3+1]=c.g; cols[i*3+2]=c.b;
+  }
+  pos.needsUpdate = true; geo.computeVertexNormals();
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1.0, metalness: 0.0, flatShading: true });
+  seabed = new THREE.Mesh(geo, mat);
+  seabed.position.y = (window.__seaLevel || 0) - 9;
+  scene.add(seabed);
+}
+
+function buildFish() {
+  const palette = [0xff8a4c, 0xffd166, 0xef6f6c, 0x6cc4ef, 0xf2f2f2];
+  for (let s = 0; s < 6; s++) {
+    const cx = (Math.random()-0.5)*70, cz = (Math.random()-0.5)*70;
+    const baseY = (window.__seaLevel || 0) - 2.5 - Math.random()*4;
+    const col = new THREE.Color(palette[s % palette.length]);
+    const n = 3 + Math.floor(Math.random()*4);
+    for (let i = 0; i < n; i++) {
+      const g = new THREE.ConeGeometry(0.42, 1.5, 5); g.rotateX(Math.PI/2);
+      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: col, roughness: 0.55, metalness: 0.0, flatShading: true }));
+      scene.add(m);
+      fishList.push({ mesh: m, cx, cz, baseY: baseY + (Math.random()-0.5)*2.5, radius: 5 + Math.random()*11, speed: 0.25 + Math.random()*0.35, phase: Math.random()*6.28 });
+    }
+  }
+}
+function animateFish(t) {
+  for (const f of fishList) {
+    const a = f.phase + t * f.speed;
+    const x = f.cx + Math.cos(a)*f.radius, z = f.cz + Math.sin(a)*f.radius;
+    const y = f.baseY + Math.sin(t*0.8 + f.phase)*0.5;
+    f.mesh.position.set(x, y, z);
+    f.mesh.lookAt(f.cx + Math.cos(a+0.12)*f.radius, y, f.cz + Math.sin(a+0.12)*f.radius);
+  }
 }
 
 function animateSea(t) {
@@ -414,6 +474,7 @@ function animate() {
   controls.update();
 
   animateSea(t);
+  animateFish(t);
   fall(raindrops, 1.4, false);
   fall(snowflakes, 0.35, true);
 
