@@ -109,7 +109,7 @@ function init() {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(SKY.clear);
-  scene.fog = new THREE.Fog(SKY.clear, 70, 280);
+  scene.fog = new THREE.Fog(SKY.clear, 70, 250);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -271,12 +271,12 @@ function loadIsland() {
 
 // ---------- seabed: large organic sandy bowl (edges hidden in fog, no hard plate) ----------
 function buildSeabed() {
-  const geo = new THREE.PlaneGeometry(820, 820, 110, 110); geo.rotateX(-Math.PI/2);
+  const geo = new THREE.PlaneGeometry(1200, 1200, 120, 120); geo.rotateX(-Math.PI/2);
   const pos = geo.attributes.position; const cols = new Float32Array(pos.count*3);
   const cSand = new THREE.Color(0xe2cfa0), cDeep = new THREE.Color(0x355a66);
   for (let i=0;i<pos.count;i++){
     const x=pos.getX(i), z=pos.getZ(i), r=Math.hypot(x,z);
-    const depth = 7 + Math.min(1, r/300)*18;                       // shallow under island -> deep outward (covers past fog)
+    const depth = 7 + Math.min(1, r/300)*18;                       // shallow under island -> deep outward (covers far past fog)
     const bump = Math.sin(x*0.05)*Math.cos(z*0.05)*1.4 + Math.sin(x*0.13+z*0.1)*0.6;
     pos.setY(i, -depth + bump);
     const k = Math.min(1, r/260); const c = cSand.clone().lerp(cDeep, k);
@@ -290,7 +290,7 @@ function buildSeabed() {
 
 // ---------- ocean: big, reaches horizon, GENTLE ripples (no plate) ----------
 function buildOcean() {
-  const geo = new THREE.PlaneGeometry(700, 700, 120, 120);
+  const geo = new THREE.PlaneGeometry(1200, 1200, 90, 90);
   geo.rotateX(-Math.PI/2);
   const pos = geo.attributes.position; const cols = new Float32Array(pos.count*3);
   const cLow = new THREE.Color(0x2e93b8), cHigh = new THREE.Color(0x7bd6da);
