@@ -103,13 +103,13 @@ function init() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.95;
+  renderer.toneMappingExposure = 0.9;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   document.getElementById('app').appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(SKY.clear);
-  scene.fog = new THREE.Fog(SKY.clear, 70, 250);
+  scene.fog = new THREE.Fog(SKY.clear, 90, 340);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -129,7 +129,7 @@ function init() {
   composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
   // subtle bloom — small light dots twinkle, scene not blown out
-  composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.45, 0.7, 0.82));
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.32, 0.6, 0.95));
   composer.addPass(new OutputPass());
 
   addSkyText();
@@ -351,8 +351,8 @@ function seedSupporters(n, geo, lift) {
   for (let i=0;i<n;i++){ const idx = above.length ? above[(Math.random()*above.length)|0] : 0;
     pts[i*3]=pos.getX(idx); pts[i*3+1]=pos.getY(idx)+lift+0.25; pts[i*3+2]=pos.getZ(idx); }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts,3));
-  const m = new THREE.PointsMaterial({ map: glowTex, color: 0xffd9a0, size: 0.7, sizeAttenuation: true,
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const m = new THREE.PointsMaterial({ map: glowTex, color: 0xffcf86, size: 0.42, sizeAttenuation: true,
+    transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
   seededLights = new THREE.Points(g, m); scene.add(seededLights);
   supporterCount = n; updateCounter();
 
@@ -360,7 +360,7 @@ function seedSupporters(n, geo, lift) {
 }
 function plantLight(p) {
   const m = new THREE.SpriteMaterial({ map: glowTex, color: 0xffe6b0, transparent:true, depthWrite:false, blending: THREE.AdditiveBlending });
-  const s = new THREE.Sprite(m); s.scale.setScalar(1.6); s.position.copy(p).add(new THREE.Vector3(0,0.3,0));
+  const s = new THREE.Sprite(m); s.scale.setScalar(1.1); s.position.copy(p).add(new THREE.Vector3(0,0.3,0));
   s.userData.pop = 0; lightSprites.add(s);
   supporterCount++; updateCounter();
 }
@@ -446,8 +446,8 @@ function animate(){
   if (island && Math.abs(snowCover - snowApplied) > 0.01){ applySnow(island.geometry, snowCover); snowApplied = snowCover; }
 
   // twinkle seeded lights + pop user lights
-  if (seededLights) seededLights.material.size = 0.6 + Math.sin(t*2)*0.08;
-  if (lightSprites) for (const s of lightSprites.children){ if (s.userData.pop<1){ s.userData.pop=Math.min(1,s.userData.pop+dt*2.2); s.scale.setScalar(1.6*s.userData.pop); } }
+  if (seededLights) seededLights.material.size = 0.4 + Math.sin(t*2)*0.06;
+  if (lightSprites) for (const s of lightSprites.children){ if (s.userData.pop<1){ s.userData.pop=Math.min(1,s.userData.pop+dt*2.2); s.scale.setScalar(1.1*s.userData.pop); } }
 
   composer.render();
 
