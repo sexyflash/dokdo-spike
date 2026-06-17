@@ -78,7 +78,7 @@ const SKY = { clear: 0x4d5f82, rain: 0x38424f, snow: 0x8896ad };   // dusk / blu
 
 let renderer, scene, camera, controls, composer;
 let islandSmooth, islandLow, island;
-let ocean, seededLights, lightSprites;
+let ocean, lightSprites, lanterns;
 const clouds = [];
 let raindrops, snowflakes, skyText;
 let weather = 'clear', lowpoly = false;
@@ -163,22 +163,29 @@ function makeCloudTexture() {
 
 // ---------- sky banner ----------
 function addSkyText() {
-  const c = document.createElement('canvas'); c.width = 2048; c.height = 512;
+  const W = 2600, H = 680;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
-  g.clearRect(0,0,2048,512);
+  g.clearRect(0,0,W,H);
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillStyle = 'rgba(255,255,255,0.96)';
-  g.font = '800 150px Pretendard, sans-serif';
-  g.shadowColor = 'rgba(40,70,110,0.35)'; g.shadowBlur = 28; g.shadowOffsetY = 6;
-  g.fillText('DOKDO IS KOREAN TERRITORY', 1024, 210);
-  g.shadowBlur = 14;
-  g.font = '600 78px Pretendard, sans-serif'; g.fillStyle = 'rgba(255,255,255,0.88)';
-  g.fillText('독도는 대한민국 영토입니다', 1024, 360);
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+
+  // main line — auto-shrink to always fit the canvas (was clipping before)
+  const main = 'DOKDO IS KOREAN TERRITORY';
+  let fs = 150; g.font = `800 ${fs}px Pretendard, sans-serif`;
+  while (g.measureText(main).width > W - 200 && fs > 40) { fs -= 4; g.font = `800 ${fs}px Pretendard, sans-serif`; }
+  g.fillStyle = 'rgba(255,255,255,0.98)';
+  g.shadowColor = 'rgba(255,190,110,0.55)'; g.shadowBlur = 34; g.shadowOffsetY = 0;
+  g.fillText(main, W/2, H*0.40);
+
+  g.shadowBlur = 16;
+  g.font = '600 84px Pretendard, sans-serif'; g.fillStyle = 'rgba(255,255,255,0.9)';
+  g.fillText('독도는 대한민국 영토입니다', W/2, H*0.74);
+
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false });
   skyText = new THREE.Sprite(mat);
-  skyText.scale.set(46, 11.5, 1);
-  skyText.position.set(0, 26, -46);
+  skyText.scale.set(44, 44 * H/W, 1);     // keep canvas aspect (no squish)
+  skyText.position.set(0, 21, -6);        // hero banner in the sky, fully inside the default frame
   scene.add(skyText);
 }
 
@@ -294,24 +301,33 @@ function animateOcean(t) {
 }
 
 // ---------- supporters: warm planted lights that brighten the lonely island ----------
+// INTERIM: trypophobic dot-carpet removed. A few soft drifting lanterns as placeholder
+// while we pick the real treatment (beams / lanterns / glow-from-within — see proposal).
 function seedSupporters(n, geo, lift) {
+  lanterns = new THREE.Group(); scene.add(lanterns);
+  lightSprites = new THREE.Group(); scene.add(lightSprites);
   const pos = geo.attributes.position; const above = [];
-  for (let i=0;i<pos.count;i++){ if (pos.getY(i) > seaY + 0.3) above.push(i); }
-  const pts = new Float32Array(n*3);
-  for (let i=0;i<n;i++){ const idx = above.length ? above[(Math.random()*above.length)|0] : 0;
-    pts[i*3]=pos.getX(idx); pts[i*3+1]=pos.getY(idx)+lift+0.25; pts[i*3+2]=pos.getZ(idx); }
-  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts,3));
-  const m = new THREE.PointsMaterial({ map: glowTex, color: 0xffb45a, size: 0.6, sizeAttenuation: true,
-    transparent: true, opacity: 1.0, depthWrite: false, blending: THREE.AdditiveBlending });
-  seededLights = new THREE.Points(g, m); scene.add(seededLights);
+  for (let i=0;i<pos.count;i++){ if (pos.getY(i) > seaY + 0.5) above.push(i); }
+  for (let i=0;i<14;i++){ const idx = above.length ? above[(Math.random()*above.length)|0] : 0;
+    addLantern(pos.getX(idx), pos.getY(idx)+lift, pos.getZ(idx)); }
   supporterCount = n; updateCounter();
-
-  lightSprites = new THREE.Group(); scene.add(lightSprites);   // user-planted (slightly brighter)
+}
+function addLantern(x, baseY, z) {
+  const m = new THREE.SpriteMaterial({ map: glowTex, color: 0xffb45a, transparent:true, opacity:0.55,
+    depthWrite:false, blending: THREE.AdditiveBlending, fog:false });
+  const s = new THREE.Sprite(m); const sc = 2.2 + Math.random()*2.6; s.scale.set(sc, sc, 1);
+  s.position.set(x, baseY + 2.5 + Math.random()*4, z);
+  s.userData = { x, z, baseY: baseY + 2.5, t: Math.random()*6.28, sway: 0.6 + Math.random()*0.9 };
+  lanterns.add(s);
+}
+function animateLanterns(dt) {
+  if (lanterns) for (const s of lanterns.children) { s.userData.t += dt; const ph = s.userData.t;
+    s.position.y = s.userData.baseY + Math.sin(ph*0.5)*1.2;
+    s.position.x = s.userData.x + Math.sin(ph*0.3)*s.userData.sway;
+    s.material.opacity = 0.42 + Math.sin(ph*1.1)*0.18; }
 }
 function plantLight(p) {
-  const m = new THREE.SpriteMaterial({ map: glowTex, color: 0xffe6b0, transparent:true, depthWrite:false, blending: THREE.AdditiveBlending });
-  const s = new THREE.Sprite(m); s.scale.setScalar(1.1); s.position.copy(p).add(new THREE.Vector3(0,0.3,0));
-  s.userData.pop = 0; lightSprites.add(s);
+  addLantern(p.x, p.y, p.z);
   supporterCount++; updateCounter();
 }
 function updateCounter() {
@@ -395,9 +411,7 @@ function animate(){
   snowCover += (snowTarget - snowCover) * Math.min(1, dt*0.6);
   if (island && Math.abs(snowCover - snowApplied) > 0.01){ applySnow(island.geometry, snowCover); snowApplied = snowCover; }
 
-  // twinkle seeded lights + pop user lights
-  if (seededLights) seededLights.material.size = 0.55 + Math.sin(t*2)*0.1;
-  if (lightSprites) for (const s of lightSprites.children){ if (s.userData.pop<1){ s.userData.pop=Math.min(1,s.userData.pop+dt*2.2); s.scale.setScalar(1.1*s.userData.pop); } }
+  animateLanterns(dt);
 
   composer.render();
 
