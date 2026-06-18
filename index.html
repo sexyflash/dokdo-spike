@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>독도 · 바위섬</title>
+<title>독도 · 스노우글로브</title>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet" />
 <style>
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -19,8 +19,9 @@
     background:rgba(255,255,255,.74);backdrop-filter:blur(12px);box-shadow:0 3px 16px rgba(20,50,70,.16);transition:transform .12s,background .2s;white-space:nowrap}
   .pill:active{transform:scale(.93)} .pill.on{background:#16323c;color:#fff}
   .fps{position:fixed;left:12px;bottom:24px;z-index:10;font-size:11px;color:#0c2630;opacity:.5}
+  .cred{position:fixed;right:12px;bottom:24px;z-index:10;font-size:10px;color:#0c2630;opacity:.4}
   .loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;
-    background:#bfe6f2;z-index:50;color:#0c2630;font-weight:600;transition:opacity .6s}
+    background:#cfeaf2;z-index:50;color:#0c2630;font-weight:600;transition:opacity .6s}
   .spin{width:34px;height:34px;border:3px solid rgba(12,38,48,.18);border-top-color:#0c2630;border-radius:50%;animation:s .9s linear infinite}
   @keyframes s{to{transform:rotate(360deg)}}
 </style>
@@ -36,6 +37,7 @@
   <button class="pill" id="resetBtn">↺ 전체</button>
 </div>
 <div class="fps" id="fps"></div>
+<div class="cred">독도 한 컷 · 프로토타입</div>
 <div class="loader" id="loader"><div class="spin"></div><div>독도를 빚는 중…</div></div>
 
 <script type="importmap">
@@ -49,17 +51,22 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
-const SKY = { clear:0xbfe6f2, rain:0x9fb0bb, snow:0xdbe6ee }, NIGHT_SKY = 0x223049;
+// snowglobe radius (round sea + sky dome share this)
+const R = 92;
+// sky palettes per state  [top, bottom(horizon)]
+const SKY = {
+  clear:[0x6fc1e6,0xe2f5fa], rain:[0x8a9aa6,0xc6d0d6], snow:[0xa6bccb,0xe9f0f5], night:[0x142340,0x35526d]
+};
 let renderer, scene, camera, controls, key, hemi, ambient;
-let water, seabed, raindrops, snowflakes, island, lights;
-let islandGeo, islandBaseCol;
+let island, islandGeo, islandBaseCol;
+let sky, skyMat, sea, seabed, raindrops, snowflakes, stars, lights;
 let seaLevel = 0, weather='clear', night=false;
-const clouds = [], rocks = [];
-const seaLow = new THREE.Color(0x1f6f86), seaHigh = new THREE.Color(0x4fb6c4);
+const clouds = [], rocks = [], ships = [];
 const clock = new THREE.Clock();
-const HOME = new THREE.Vector3(0,40,60), TGT = new THREE.Vector3(0,0,0);
+const clip = new THREE.Plane(new THREE.Vector3(0,1,0), 0);  // keeps geometry ABOVE the waterline
+const HOME = new THREE.Vector3(0,34,62), TGT = new THREE.Vector3(0,4,0);
 let flying=false, flyT=0; const fFrom=new THREE.Vector3(), tFrom=new THREE.Vector3();
 
 init();
@@ -69,13 +76,13 @@ function init() {
   renderer.setPixelRatio(Math.min(devicePixelRatio,2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.localClippingEnabled = true;                       // for the waterline clip
   document.getElementById('app').appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(SKY.clear);
-  scene.fog = new THREE.Fog(SKY.clear, 90, 650);
+  scene.fog = new THREE.Fog(0xe2f5fa, R*0.9, R*2.0);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
@@ -83,15 +90,15 @@ function init() {
   camera.position.copy(HOME);
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
-  controls.minDistance = 16; controls.maxDistance = 170; controls.maxPolarAngle = Math.PI/2.15;
+  controls.minDistance = 18; controls.maxDistance = 84; controls.maxPolarAngle = Math.PI/2.08;
   controls.target.copy(TGT);
 
-  key = new THREE.DirectionalLight(0xfff1d6, 1.6); key.position.set(48,78,34); key.castShadow=true;
+  key = new THREE.DirectionalLight(0xfff1d6, 1.5); key.position.set(46,74,32); key.castShadow=true;
   key.shadow.mapSize.set(2048,2048);
-  const sc=key.shadow.camera; sc.near=1; sc.far=280; sc.left=-55; sc.right=55; sc.top=55; sc.bottom=-55;
+  const sc=key.shadow.camera; sc.near=1; sc.far=260; sc.left=-55; sc.right=55; sc.top=55; sc.bottom=-55;
   key.shadow.bias=-0.0006; key.shadow.normalBias=0.6; scene.add(key);
-  hemi = new THREE.HemisphereLight(0xdcf0ff, 0x6a7560, 0.5); scene.add(hemi);
-  ambient = new THREE.AmbientLight(0xffffff, 0.18); scene.add(ambient);
+  hemi = new THREE.HemisphereLight(0xdcf0ff, 0x6a7560, 0.55); scene.add(hemi);
+  ambient = new THREE.AmbientLight(0xffffff, 0.2); scene.add(ambient);
 
   addEventListener('resize', onResize);
   document.querySelectorAll('[data-w]').forEach(b=>b.addEventListener('click',()=>setWeather(b.dataset.w)));
@@ -102,28 +109,35 @@ function init() {
 function onResize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); }
 
 async function build() {
+  addSky();
+
   const stl = await new STLLoader().loadAsync('Dokdo_Korea.stl');
   stl.rotateX(-Math.PI/2); stl.center();
   stl.computeBoundingBox(); const sz=new THREE.Vector3(); stl.boundingBox.getSize(sz);
-  const s = 60/Math.max(sz.x,sz.y,sz.z); stl.scale(s,s,s);
+  const s = 58/Math.max(sz.x,sz.y,sz.z); stl.scale(s,s,s);
   let g; try{ g = mergeVertices(stl, 1e-3); }catch(e){ g = stl; }
   g.computeBoundingBox();
   const gMinY=g.boundingBox.min.y, gMaxY=g.boundingBox.max.y;
-  const seaY = gMinY + (gMaxY-gMinY)*0.10; const lift=-gMinY*0.5;
+  const seaY = gMinY + (gMaxY-gMinY)*0.12; const lift=-gMinY*0.5;
   seaLevel = lift + seaY;
   g.translate(0, lift, 0); g.computeVertexNormals();
+  clip.constant = -seaLevel;                                  // clip everything below the sea (skirt GONE)
   colorDokdo(g, seaLevel);
-  // SMOOTH shading (flatShading:false) — no more harsh facets
-  island = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:false, roughness:0.95, metalness:0, envMapIntensity:0.35 }));
+  island = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+    vertexColors:true, flatShading:false, roughness:0.95, metalness:0, envMapIntensity:0.35,
+    clippingPlanes:[clip], clipShadows:true }));
   island.castShadow = true; island.receiveShadow = true; scene.add(island);
   islandGeo = g; islandBaseCol = Float32Array.from(g.attributes.color.array);
 
-  addSeabedAndWater();
+  addSeaAndFloor();
   addRocks();
+  addTower();
   addSupporterLights();
   addClouds();
+  addShips();
+  addStars();
 
-  window.__dbg = { scene, island, water, seabed, lights, get seaLevel(){return seaLevel;} };
+  window.__dbg = { scene, island, sea, seabed, lights, sky, get seaLevel(){return seaLevel;} };
   document.getElementById('loader').style.opacity='0'; setTimeout(()=>document.getElementById('loader').remove(),600);
   animate();
 }
@@ -133,7 +147,7 @@ function colorDokdo(geo, sea) {
   const pos=geo.attributes.position, nor=geo.attributes.normal;
   let minY=1e9,maxY=-1e9; for(let i=0;i<pos.count;i++){const y=pos.getY(i); if(y<minY)minY=y; if(y>maxY)maxY=y;}
   const cliff=new THREE.Color(0x5f574d), rockMid=new THREE.Color(0x847a6e), rockHi=new THREE.Color(0xa79c8c),
-        moss=new THREE.Color(0x6f8a46), shore=new THREE.Color(0xbfb295), sub=new THREE.Color(0x35463f);
+        moss=new THREE.Color(0x6f8a46), shore=new THREE.Color(0xb9ac8e), sub=new THREE.Color(0x4a5f54);
   const cols=new Float32Array(pos.count*3); const c=new THREE.Color();
   for(let i=0;i<pos.count;i++){
     const y=pos.getY(i), ny=Math.max(0,nor.getY(i));
@@ -141,56 +155,91 @@ function colorDokdo(geo, sea) {
     else{ const t=(y-sea)/((maxY-sea)||1);
       c.copy(rockMid).lerp(rockHi, t*0.55);
       c.lerp(cliff,(1-ny)*0.55);
-      const green=Math.pow(ny,2.2)*THREE.MathUtils.smoothstep(t,0.15,0.55);
-      c.lerp(moss,green*0.75);
-      if(t<0.07) c.lerp(shore,(0.07-t)/0.07*0.5);
+      const green=Math.pow(ny,2.2)*THREE.MathUtils.smoothstep(t,0.12,0.5);
+      c.lerp(moss,green*0.78);
+      if(t<0.06) c.lerp(shore,(0.06-t)/0.06*0.5);
     }
     cols[i*3]=c.r; cols[i*3+1]=c.g; cols[i*3+2]=c.b;
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
 }
 
-// opaque seabed sits JUST under the surface — buries the STL's flat bottom skirt
-// (that flat skirt was the "네모난 바닥판") + gives a shallow see-through floor.
-// translucent rippling water on top.
-function addSeabedAndWater(){
-  seabed = new THREE.Mesh(new THREE.PlaneGeometry(2600,2600,1,1).rotateX(-Math.PI/2),
+// ── sky dome (gradient, BackSide) — the snowglobe shell ──
+function addSky(){
+  skyMat = new THREE.ShaderMaterial({
+    side:THREE.BackSide, depthWrite:false, fog:false,
+    uniforms:{ top:{value:new THREE.Color(SKY.clear[0])}, bot:{value:new THREE.Color(SKY.clear[1])} },
+    vertexShader:`varying float h; void main(){ h=normalize(position).y; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader:`uniform vec3 top; uniform vec3 bot; varying float h;
+      void main(){ float t=clamp(h*1.25+0.02,0.0,1.0); t=pow(t,0.72); gl_FragColor=vec4(mix(bot,top,t),1.0); }`
+  });
+  sky = new THREE.Mesh(new THREE.SphereGeometry(R*1.04, 48, 24, 0, Math.PI*2, 0, Math.PI*0.62), skyMat);
+  scene.add(sky);
+}
+
+// ── round sea disk + round sea floor (no square plate, ever) ──
+function addSeaAndFloor(){
+  seabed = new THREE.Mesh(new THREE.CircleGeometry(R*1.02, 96).rotateX(-Math.PI/2),
     new THREE.MeshStandardMaterial({ color:0x2f8a93, roughness:1, metalness:0 }));
-  seabed.position.y = seaLevel - 0.25; seabed.receiveShadow = true; scene.add(seabed);
+  seabed.position.y = seaLevel - 1.4; seabed.receiveShadow = true; scene.add(seabed);
 
-  const geo = new THREE.PlaneGeometry(1400,1400,110,110); geo.rotateX(-Math.PI/2);
+  const geo = new THREE.RingGeometry(0.25, R, 110, 44).rotateX(-Math.PI/2);   // radial grid → real ripples
   geo.userData.base = Float32Array.from(geo.attributes.position.array);
-  water = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color:0x3f9fb0, roughness:0.34, metalness:0,
-    transparent:true, opacity:0.72, depthWrite:false, envMapIntensity:0.5 }));
-  water.position.y = seaLevel; water.renderOrder = 2; scene.add(water);
+  sea = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color:0x46aec4, roughness:0.3, metalness:0,
+    transparent:true, opacity:0.74, depthWrite:false, envMapIntensity:0.55 }));
+  sea.position.y = seaLevel; sea.renderOrder = 2; scene.add(sea);
 }
-function animateWater(t){
-  if(!water) return;
-  const pos=water.geometry.attributes.position, base=water.geometry.userData.base;
-  const amp = weather==='rain' ? 0.28 : 0.13;                       // very gentle ripples
+function animateSea(t){
+  if(!sea) return;
+  const pos=sea.geometry.attributes.position, base=sea.geometry.userData.base;
+  const amp = weather==='rain' ? 0.32 : 0.16;
   for(let i=0;i<pos.count;i++){ const x=base[i*3], z=base[i*3+2];
-    pos.setY(i, (Math.sin(x*0.22+t*1.2)*0.5 + Math.cos(z*0.26+t*1.0)*0.5)*amp); }
-  pos.needsUpdate=true; water.geometry.computeVertexNormals();
+    pos.setY(i, (Math.sin(x*0.16+t*1.1)*0.5 + Math.cos(z*0.18+t*0.95)*0.5)*amp); }
+  pos.needsUpdate=true; sea.geometry.computeVertexNormals();
 }
 
-// surrounding rock islets — SOLID & rounded (no shattered shards), breaching the surface
+// ── companion rock islets (Dokdo has ~89) — solid, rounded ──
 function addRocks(){
-  for(let i=0;i<9;i++){
-    const r=1.2+Math.random()*2.6, geo=new THREE.IcosahedronGeometry(r,1), p=geo.attributes.position;
-    // coherent gentle lumpiness, NOT per-vertex shards
-    for(let k=0;k<p.count;k++){ const f=0.86+Math.random()*0.16;
-      p.setXYZ(k, p.getX(k)*f, p.getY(k)*f*0.9, p.getZ(k)*f); }
+  for(let i=0;i<7;i++){
+    const r=1.0+Math.random()*2.2, geo=new THREE.IcosahedronGeometry(r,1), p=geo.attributes.position;
+    for(let k=0;k<p.count;k++){ const f=0.86+Math.random()*0.16; p.setXYZ(k, p.getX(k)*f, p.getY(k)*f*0.9, p.getZ(k)*f); }
     geo.computeVertexNormals();
     const mat=new THREE.MeshStandardMaterial({ color:new THREE.Color().setHSL(0.08,0.22,0.25+Math.random()*0.1), flatShading:true, roughness:1, metalness:0, envMapIntensity:0.25 });
-    const m=new THREE.Mesh(geo,mat); const a=Math.random()*6.28, dist=22+Math.random()*32;
-    m.position.set(Math.cos(a)*dist, seaLevel + r*0.4, Math.sin(a)*dist);   // mostly ABOVE water
-    m.rotation.y=Math.random()*6.28; m.scale.y=0.7+Math.random()*0.25;
+    const m=new THREE.Mesh(geo,mat); const a=Math.random()*6.28, dist=24+Math.random()*22;
+    m.position.set(Math.cos(a)*dist, seaLevel + r*0.4, Math.sin(a)*dist);
+    m.rotation.y=Math.random()*6.28; m.scale.y=0.72+Math.random()*0.22;
     m.castShadow=true; m.receiveShadow=true; m.userData.base=mat.color.clone();
     scene.add(m); rocks.push(m);
   }
 }
 
-// ── supporter lights (the "불빛 스팟") — soft warm halos people plant on Dokdo ──
+// find Dokdo's highest summit (동도 — real Dokdo has a lighthouse here)
+function summit(){
+  const pos=islandGeo.attributes.position; let bx=0,by=-1e9,bz=0;
+  for(let i=0;i<pos.count;i++){ const y=pos.getY(i); if(y>by){ by=y; bx=pos.getX(i); bz=pos.getZ(i); } }
+  return new THREE.Vector3(bx,by,bz);
+}
+// ── 지킴이 등대 (our own low-poly lighthouse) ──
+function addTower(){
+  const g=new THREE.Group();
+  const stone=new THREE.MeshStandardMaterial({color:0x8d8f93,roughness:0.95,flatShading:true});
+  const white=new THREE.MeshStandardMaterial({color:0xf2f3ee,roughness:0.7});
+  const red=new THREE.MeshStandardMaterial({color:0xd8463f,roughness:0.6});
+  const glass=new THREE.MeshStandardMaterial({color:0xffe6a0,emissive:0xffcf73,emissiveIntensity:1.4,roughness:0.4});
+  const base=new THREE.Mesh(new THREE.CylinderGeometry(1.05,1.5,1.1,8),stone); base.position.y=0.55;
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.86,3.0,12),white); body.position.y=2.4;
+  const band=new THREE.Mesh(new THREE.CylinderGeometry(0.65,0.7,0.5,12),red); band.position.y=2.5;
+  const lamp=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.55,0.7,10),glass); lamp.position.y=4.15;
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(0.68,0.6,10),red); roof.position.y=4.75;
+  [base,body,band,lamp,roof].forEach(m=>{m.castShadow=true; g.add(m);});
+  const beacon=new THREE.PointLight(0xffdca0,0.0,26,2); beacon.position.y=4.15; g.add(beacon);
+  g.userData.beacon=beacon; g.userData.lamp=lamp;
+  const su=summit(); g.position.set(su.x, su.y-0.2, su.z); g.scale.setScalar(0.92);
+  scene.add(g); g.userData.isTower=true; window.__tower=g; tower=g;
+}
+let tower;
+
+// ── supporter lights ("불빛 스팟") — soft warm halos people plant on Dokdo ──
 function haloTexture(){
   const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d');
   const g=x.createRadialGradient(32,32,0,32,32,32);
@@ -202,33 +251,66 @@ function addSupporterLights(){
   const tex=haloTexture(); lights=new THREE.Group(); scene.add(lights);
   const ray=new THREE.Raycaster(), down=new THREE.Vector3(0,-1,0);
   let placed=0, tries=0;
-  while(placed<44 && tries<900){
+  while(placed<42 && tries<900){
     tries++;
-    const a=Math.random()*6.28, rad=Math.sqrt(Math.random())*27;
+    const a=Math.random()*6.28, rad=Math.sqrt(Math.random())*26;
     const x=Math.cos(a)*rad, z=Math.sin(a)*rad;
     ray.set(new THREE.Vector3(x,260,z), down);
     const hit=ray.intersectObject(island,true)[0];
-    if(!hit || hit.point.y < seaLevel+0.6) continue;          // land above water only
+    if(!hit || hit.point.y < seaLevel+0.6) continue;
     const spr=new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, color:0xffd07a, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, fog:false }));
-    const sc=1.0+Math.random()*1.5; spr.scale.set(sc,sc,1);
-    spr.position.set(hit.point.x, hit.point.y+0.55, hit.point.z);
+    const sc=1.0+Math.random()*1.4; spr.scale.set(sc,sc,1);
+    spr.position.set(hit.point.x, hit.point.y+0.5, hit.point.z);
     spr.userData={ ph:Math.random()*6.28, base:sc };
     lights.add(spr); placed++;
   }
 }
 
-function makeCloudGeo(){ const parts=[]; const n=3+Math.floor(Math.random()*3);
-  for(let i=0;i<n;i++){ const r=2+Math.random()*2.4; const gg=new THREE.IcosahedronGeometry(r,0);
-    gg.translate((Math.random()-0.5)*6,(Math.random()-0.5)*1.4,(Math.random()-0.5)*3.2); parts.push(gg); }
-  const m=mergeGeometries(parts,false); m.computeVertexNormals(); return m; }
 function addClouds(){
-  const mat=new THREE.MeshStandardMaterial({ color:0xffffff, flatShading:true, roughness:1, metalness:0, fog:false });
-  for(let i=0;i<6;i++){ const c=new THREE.Mesh(makeCloudGeo(),mat); const s=0.8+Math.random()*0.6; c.scale.set(s,s*0.7,s);
-    c.position.set((Math.random()-0.5)*230,40+Math.random()*22,(Math.random()-0.5)*170); c.userData.spd=0.4+Math.random()*0.6; scene.add(c); clouds.push(c); }
+  const mat=new THREE.MeshStandardMaterial({ color:0xffffff, flatShading:true, roughness:1, metalness:0, fog:false, transparent:true, opacity:0.9 });
+  for(let i=0;i<8;i++){
+    const grp=new THREE.Group(); const n=3+Math.floor(Math.random()*3);
+    for(let k=0;k<n;k++){ const r=1.1+Math.random()*1.6; const m=new THREE.Mesh(new THREE.IcosahedronGeometry(r,0),mat);
+      m.position.set((Math.random()-0.5)*5,(Math.random()-0.5)*1.1,(Math.random()-0.5)*2.6); grp.add(m); }
+    const a=Math.random()*6.28, dist=46+Math.random()*30;
+    grp.position.set(Math.cos(a)*dist, 44+Math.random()*16, Math.sin(a)*dist);
+    grp.scale.setScalar(0.7+Math.random()*0.4);
+    grp.userData.ang=a; grp.userData.dist=dist; grp.userData.spd=0.015+Math.random()*0.025;
+    scene.add(grp); clouds.push(grp);
+  }
+}
+function addStars(){
+  const N=420, p=new Float32Array(N*3);
+  for(let i=0;i<N;i++){ const u=Math.random(), th=Math.random()*6.28, ph=Math.acos(0.15+0.8*u);
+    const rr=R*1.0; p[i*3]=rr*Math.sin(ph)*Math.cos(th); p[i*3+1]=rr*Math.cos(ph); p[i*3+2]=rr*Math.sin(ph)*Math.sin(th); }
+  const gg=new THREE.BufferGeometry(); gg.setAttribute('position',new THREE.BufferAttribute(p,3));
+  stars=new THREE.Points(gg,new THREE.PointsMaterial({color:0xfff6e0,size:0.5,transparent:true,opacity:0.9,depthWrite:false,fog:false}));
+  stars.visible=false; scene.add(stars);
 }
 
-// ── weather + day/night controls (brought back) ──
-function applySky(){ const col=new THREE.Color(night?NIGHT_SKY:SKY[weather]); scene.background.copy(col); scene.fog.color.copy(col); }
+// ── little boats drifting around the island ──
+function addShips(){
+  for(let i=0;i<3;i++){
+    const g=new THREE.Group();
+    const hull=new THREE.Mesh(new THREE.BoxGeometry(1.5,0.5,0.7), new THREE.MeshStandardMaterial({color:0x7a5a3a,roughness:0.9,flatShading:true}));
+    hull.castShadow=true; g.add(hull);
+    const mast=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,1.4,6), new THREE.MeshStandardMaterial({color:0x5a4530}));
+    mast.position.y=0.9; g.add(mast);
+    const sail=new THREE.Mesh(new THREE.PlaneGeometry(0.8,0.9), new THREE.MeshStandardMaterial({color:0xf4efe2,side:THREE.DoubleSide,roughness:0.8}));
+    sail.position.set(0.02,0.95,0); sail.rotation.y=Math.PI/2; g.add(sail);
+    g.userData={ ang:Math.random()*6.28, dist:34+Math.random()*22, spd:(0.05+Math.random()*0.05)*(Math.random()<0.5?1:-1), ph:Math.random()*6.28 };
+    g.scale.setScalar(1.1); scene.add(g); ships.push(g);
+  }
+}
+
+// ── controls: weather + day/night ──
+function applySky(){
+  const k = night ? 'night' : weather;
+  const pal = SKY[k] || SKY.clear;
+  skyMat.uniforms.top.value.setHex(pal[0]);
+  skyMat.uniforms.bot.value.setHex(pal[1]);
+  scene.fog.color.setHex(pal[1]);
+}
 function setWeather(w){
   weather=w; document.querySelectorAll('[data-w]').forEach(b=>b.classList.toggle('on',b.dataset.w===w));
   if(w==='rain'&&!raindrops) makeRain(); if(w==='snow'&&!snowflakes) makeSnow();
@@ -236,7 +318,15 @@ function setWeather(w){
   snowCover(w==='snow');
   applySky();
 }
-// snow settles on flat, higher terrain (not cliffs/underwater) + whitens rock tops
+function setNight(on){
+  night=on; key.intensity=on?0.5:1.5; hemi.intensity=on?0.34:0.55; ambient.intensity=on?0.14:0.2;
+  if(sea) sea.material.color.setHex(on?0x1c5366:0x46aec4);
+  if(seabed) seabed.material.color.setHex(on?0x183f44:0x2f8a93);
+  if(stars) stars.visible=on;
+  const b=document.getElementById('nightBtn'); b.classList.toggle('on',on); b.textContent=on?'☀️ 낮':'🌙 밤';
+  applySky();
+}
+// snow settles on flat, higher terrain (not cliffs) + whitens rock tops
 function snowCover(on){
   if(islandGeo){
     const col=islandGeo.attributes.color, nor=islandGeo.attributes.normal, pos=islandGeo.attributes.position, base=islandBaseCol;
@@ -253,23 +343,16 @@ function snowCover(on){
   const white=new THREE.Color(0xeef4f9);
   for(const m of rocks){ const b=m.userData.base; m.material.color.copy(on? b.clone().lerp(white,0.55) : b); }
 }
-function setNight(on){
-  night=on; key.intensity=on?0.55:1.6; hemi.intensity=on?0.35:0.5; ambient.intensity=on?0.12:0.18;
-  if(on){ seaLow.set(0x143a4a); seaHigh.set(0x276274); } else { seaLow.set(0x1f6f86); seaHigh.set(0x4fb6c4); }
-  if(water) water.material.color.copy(night? new THREE.Color(0x1c5366) : new THREE.Color(0x2c8fb0));
-  const b=document.getElementById('nightBtn'); b.classList.toggle('on',on); b.textContent=on?'☀️ 낮':'🌙 밤';
-  applySky();
-}
 function makeRain(){ const N=2600,gg=new THREE.BufferGeometry(),p=new Float32Array(N*3);
-  for(let i=0;i<N;i++){p[i*3]=(Math.random()-0.5)*150;p[i*3+1]=Math.random()*90;p[i*3+2]=(Math.random()-0.5)*150;}
+  for(let i=0;i<N;i++){const a=Math.random()*6.28,d=Math.random()*R*0.9;p[i*3]=Math.cos(a)*d;p[i*3+1]=Math.random()*60;p[i*3+2]=Math.sin(a)*d;}
   gg.setAttribute('position',new THREE.BufferAttribute(p,3));
-  raindrops=new THREE.Points(gg,new THREE.PointsMaterial({color:0xcfe6ff,size:0.16,transparent:true,opacity:0.55,depthWrite:false})); raindrops.visible=(weather==='rain'); scene.add(raindrops); }
+  raindrops=new THREE.Points(gg,new THREE.PointsMaterial({color:0xcfe6ff,size:0.16,transparent:true,opacity:0.55,depthWrite:false,fog:false})); raindrops.visible=(weather==='rain'); scene.add(raindrops); }
 function makeSnow(){ const N=1500,gg=new THREE.BufferGeometry(),p=new Float32Array(N*3);
-  for(let i=0;i<N;i++){p[i*3]=(Math.random()-0.5)*150;p[i*3+1]=Math.random()*90;p[i*3+2]=(Math.random()-0.5)*150;}
+  for(let i=0;i<N;i++){const a=Math.random()*6.28,d=Math.random()*R*0.9;p[i*3]=Math.cos(a)*d;p[i*3+1]=Math.random()*60;p[i*3+2]=Math.sin(a)*d;}
   gg.setAttribute('position',new THREE.BufferAttribute(p,3));
-  snowflakes=new THREE.Points(gg,new THREE.PointsMaterial({color:0xffffff,size:0.5,transparent:true,opacity:0.9,depthWrite:false})); snowflakes.visible=(weather==='snow'); scene.add(snowflakes); }
+  snowflakes=new THREE.Points(gg,new THREE.PointsMaterial({color:0xffffff,size:0.5,transparent:true,opacity:0.9,depthWrite:false,fog:false})); snowflakes.visible=(weather==='snow'); scene.add(snowflakes); }
 function fall(pts,sp,drift){ if(!pts||!pts.visible)return; const a=pts.geometry.attributes.position.array;
-  for(let i=0;i<a.length;i+=3){ a[i+1]-=sp; if(drift)a[i]+=Math.sin(performance.now()*0.001+i)*0.02; if(a[i+1]<0)a[i+1]=90; } pts.geometry.attributes.position.needsUpdate=true; }
+  for(let i=0;i<a.length;i+=3){ a[i+1]-=sp; if(drift)a[i]+=Math.sin(performance.now()*0.001+i)*0.02; if(a[i+1]<seaLevel)a[i+1]=60; } pts.geometry.attributes.position.needsUpdate=true; }
 
 function flyHome(){ fFrom.copy(camera.position); tFrom.copy(controls.target); flying=true; flyT=0; }
 const ease=t=>t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
@@ -279,10 +362,13 @@ function animate(){
   requestAnimationFrame(animate);
   const dt=clock.getDelta(), t=clock.elapsedTime;
   if(flying){ flyT+=dt/1.3; const k=ease(Math.min(flyT,1)); camera.position.lerpVectors(fFrom,HOME,k); controls.target.lerpVectors(tFrom,TGT,k); if(flyT>=1)flying=false; }
-  for(const c of clouds){ c.position.x+=c.userData.spd*dt; if(c.position.x>150)c.position.x=-150; }
+  for(const c of clouds){ c.userData.ang+=c.userData.spd*dt; c.position.x=Math.cos(c.userData.ang)*c.userData.dist; c.position.z=Math.sin(c.userData.ang)*c.userData.dist; }
+  for(const s of ships){ const u=s.userData; u.ang+=u.spd*dt; s.position.set(Math.cos(u.ang)*u.dist, seaLevel+0.15+Math.sin(t*1.4+u.ph)*0.12, Math.sin(u.ang)*u.dist); s.rotation.y=-u.ang+(u.spd>0?Math.PI/2:-Math.PI/2); s.rotation.z=Math.sin(t*1.2+u.ph)*0.05; }
   if(lights){ for(const s of lights.children){ const tw=0.78+0.22*Math.sin(t*2.2+s.userData.ph);
-    s.material.opacity=(night?0.95:0.62)*tw; const sc=s.userData.base*(0.94+0.1*tw); s.scale.set(sc,sc,1); } }
-  animateWater(t); fall(raindrops,0.9,false); fall(snowflakes,0.3,true);
+    s.material.opacity=(night?0.95:0.6)*tw; const sc=s.userData.base*(0.94+0.1*tw); s.scale.set(sc,sc,1); } }
+  if(tower){ const tw=0.7+0.3*Math.sin(t*1.6); tower.userData.beacon.intensity=(night?2.6:0.7)*tw;
+    tower.userData.lamp.material.emissiveIntensity=(night?2.2:1.2)*tw; }
+  animateSea(t); fall(raindrops,0.9,false); fall(snowflakes,0.3,true);
   controls.update(); renderer.render(scene,camera);
   frames++; const now=performance.now(); if(now-last>500){ document.getElementById('fps').textContent=Math.round(frames*1000/(now-last))+' fps'; frames=0; last=now; }
 }
