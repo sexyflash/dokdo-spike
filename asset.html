@@ -66,6 +66,7 @@ function init() {
 
   new ColladaLoader().load('asset/island.dae', (collada) => {
     const model = collada.scene;
+    window.__model = model;   // debug: expose for inventory analysis
     model.traverse(o => { if (o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
 
     // frame it regardless of original scale/orientation
