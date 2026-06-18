@@ -190,10 +190,11 @@ function extractProps(model) {
       mesh.castShadow=true; mesh.receiveShadow=true; g.add(mesh); }
     const box=new THREE.Box3().setFromObject(g); const cx=(box.min.x+box.max.x)/2, cz=(box.min.z+box.max.z)/2, minY=box.min.y;
     const sz=new THREE.Vector3(); box.getSize(sz); const maxXZ=Math.max(sz.x,sz.z);
-    // keep palms/grass (green, not too sprawling) and small grey rocks; drop the rest (plane, big boulders)
+    const bright=cl.reduce((a,m)=>a+(m.col.r+m.col.g+m.col.b)/3,0)/cl.length;
+    // keep palms/grass (green) and medium-grey rocks; drop plane, big boulders, near-black rocks
     let keep=false, type='';
     if (hasGreen && maxXZ < 11 && sz.y > 0.6) { keep=true; type = sz.y>3.5 ? 'palm':'grass'; }
-    else if (greyOnly && maxXZ < 4.8 && sz.y > 0.5) { keep=true; type='rock'; }
+    else if (greyOnly && maxXZ < 4.5 && sz.y > 0.5 && bright > 0.14) { keep=true; type='rock'; }
     if (!keep) continue;
     g.children.forEach(ch=>{ ch.position.x-=cx; ch.position.y-=minY; ch.position.z-=cz; });
     g.userData = { h: sz.y, type };
@@ -208,8 +209,8 @@ const _ray=new THREE.Raycaster(), _down=new THREE.Vector3(0,-1,0);
 function scatterProps(groups){
   if(!groups.length){ console.warn('no props'); return; }
   // weighted pool: lots of palms/grass, few rocks
-  const pool=[]; groups.forEach(g=>{ const w = g.userData.type==='palm'?4 : g.userData.type==='grass'?3 : 1; for(let k=0;k<w;k++) pool.push(g); });
-  const SCALE = { palm:[0.42,0.62], grass:[0.28,0.45], rock:[0.3,0.5] };
+  const pool=[]; groups.forEach(g=>{ const w = g.userData.type==='palm'?6 : g.userData.type==='grass'?3 : 1; for(let k=0;k<w;k++) pool.push(g); });
+  const SCALE = { palm:[0.5,0.78], grass:[0.28,0.44], rock:[0.24,0.4] };
   island.geometry.computeBoundingBox();
   const bb=island.geometry.boundingBox;
   let placed=0, tries=0, target=260;
