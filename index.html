@@ -151,7 +151,8 @@ function addClouds(){
 }
 
 // ── extract reusable props (palms/rocks/grass) from the asset by clustering nearby meshes ──
-const isFoliage = c => c.g>0.55 && c.b<0.42 && c.r>0.4;             // yellow-green leaves/grass
+// colours are in LINEAR space here (three colorManagement)
+const isFoliage = c => c.g>=c.r && c.g>c.b && c.g>0.35 && c.b<0.25;   // green leaves/grass
 const isGrey    = c => Math.abs(c.r-c.g)<0.1 && Math.abs(c.g-c.b)<0.1;
 function extractProps(model) {
   const meshes = [];
@@ -159,8 +160,10 @@ function extractProps(model) {
   model.traverse(o => {
     if (!o.isMesh) return;
     o.geometry.computeBoundingBox();
-    const s=new THREE.Vector3(); o.geometry.boundingBox.getSize(s);
-    const maxDim=Math.max(s.x,s.y,s.z);
+    o.updateWorldMatrix(true,false);
+    const wb=o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld);
+    const s=new THREE.Vector3(); wb.getSize(s);
+    const maxDim=Math.max(s.x,s.y,s.z);                 // WORLD size (node scale matters!)
     if (maxDim > 10) return;            // skip big stuff: water tile, plane wreck, giant boulders
     const mat=Array.isArray(o.material)?o.material[0]:o.material;
     if (!mat?.color) return;
