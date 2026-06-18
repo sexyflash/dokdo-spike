@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>원본 에셋 로드 테스트 — Low Poly Island</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet" />
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{width:100%;height:100%;overflow:hidden;font-family:'Pretendard',sans-serif}
+  #app{position:fixed;inset:0}
+  canvas{display:block}
+  .meta{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:10;color:#1e2a32;font-size:13px;font-weight:700;
+    background:rgba(255,255,255,.7);backdrop-filter:blur(10px);padding:8px 15px;border-radius:999px;box-shadow:0 2px 14px rgba(40,60,80,.12);text-align:center}
+  .cred{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:10;color:#1e2a32;opacity:.6;font-size:11px;font-weight:600;text-align:center}
+  .loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;
+    background:#cfe8f2;z-index:50;color:#1e2a32;font-weight:600;transition:opacity .6s}
+  .spin{width:34px;height:34px;border:3px solid rgba(30,42,50,.18);border-top-color:#1e2a32;border-radius:50%;animation:s .9s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .fps{position:fixed;left:12px;bottom:14px;z-index:10;font-size:11px;color:#1e2a32;opacity:.5}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="meta">🏝️ 다운받은 원본 에셋 (COLLADA .dae) — 실제 로드 테스트</div>
+<div class="cred">3D: "Low Poly Island" by EdwiixGG (@Edwin3D) · CC BY 4.0 · sketchfab.com · modified</div>
+<div class="fps" id="fps"></div>
+<div class="loader" id="loader"><div class="spin"></div><div>원본 에셋 로딩 중… (8MB)</div></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+let renderer, scene, camera, controls;
+const clock = new THREE.Clock();
+
+init();
+
+function init() {
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.getElementById('app').appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xbfe6f2);
+
+  camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 5000);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+
+  const dir = new THREE.DirectionalLight(0xfff2dc, 1.6); dir.position.set(60,120,40); dir.castShadow=true;
+  dir.shadow.mapSize.set(2048,2048); scene.add(dir);
+  scene.add(new THREE.HemisphereLight(0xcfeafe, 0x88a596, 0.7));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+  new ColladaLoader().load('asset/island.dae', (collada) => {
+    const model = collada.scene;
+    model.traverse(o => { if (o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
+
+    // frame it regardless of original scale/orientation
+    const box = new THREE.Box3().setFromObject(model);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const center = new THREE.Vector3(); box.getCenter(center);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const s = 60 / maxDim;
+    model.scale.setScalar(s);
+    model.position.sub(center.clone().multiplyScalar(s));   // recenter at origin
+    scene.add(model);
+
+    camera.position.set(0, 45, 80);
+    controls.target.set(0, 0, 0); controls.update();
+
+    const ld = document.getElementById('loader'); ld.style.opacity='0'; setTimeout(()=>ld.remove(),600);
+    animate();
+  }, (xhr)=>{}, (err)=>{ document.getElementById('loader').innerHTML = '로드 실패 😢<br>'+err; console.error(err); });
+
+  addEventListener('resize', () => { camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+}
+
+let frames=0,last=performance.now();
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  frames++; const now=performance.now(); if(now-last>500){ document.getElementById('fps').textContent=Math.round(frames*1000/(now-last))+' fps'; frames=0; last=now; }
+}
+</script>
+</body>
+</html>
