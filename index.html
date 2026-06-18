@@ -151,6 +151,8 @@ function addClouds(){
 }
 
 // ── extract reusable props (palms/rocks/grass) from the asset by clustering nearby meshes ──
+const isFoliage = c => c.g>0.55 && c.b<0.42 && c.r>0.4;             // yellow-green leaves/grass
+const isGrey    = c => Math.abs(c.r-c.g)<0.1 && Math.abs(c.g-c.b)<0.1;
 function extractProps(model) {
   const meshes = [];
   model.updateMatrixWorld(true);
@@ -159,55 +161,67 @@ function extractProps(model) {
     o.geometry.computeBoundingBox();
     const s=new THREE.Vector3(); o.geometry.boundingBox.getSize(s);
     const maxDim=Math.max(s.x,s.y,s.z);
+    if (maxDim > 10) return;            // skip big stuff: water tile, plane wreck, giant boulders
     const mat=Array.isArray(o.material)?o.material[0]:o.material;
-    const hex='#'+(mat?.color?.getHexString?.()||'000000');
-    if (maxDim > 24) return;          // skip the big water/base tile
-    if (hex==='#21ccbb') return;       // water
-    if (hex==='#8986cc') return;       // fish
+    if (!mat?.color) return;
+    if (mat.color.b>0.5 && mat.color.g>0.6 && mat.color.r<0.4) return;  // teal water
+    if (mat.color.b>0.6 && mat.color.r>0.4 && mat.color.r<0.7) return;  // purple fish
     const center=o.geometry.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(o.matrixWorld);
-    meshes.push({ o, center });
+    meshes.push({ o, center, col: mat.color });
   });
   // cluster by XZ proximity
-  const used=new Array(meshes.length).fill(false); const R=5.0; const clusters=[];
+  const used=new Array(meshes.length).fill(false); const R=4.0; const clusters=[];
   for(let i=0;i<meshes.length;i++){ if(used[i])continue; const grp=[i]; used[i]=true;
     for(let qi=0; qi<grp.length; qi++){ const a=meshes[grp[qi]];
       for(let j=0;j<meshes.length;j++){ if(used[j])continue;
         if(Math.hypot(a.center.x-meshes[j].center.x, a.center.z-meshes[j].center.z) < R){ used[j]=true; grp.push(j); } } }
     clusters.push(grp.map(k=>meshes[k])); }
-  // build a normalized THREE.Group per cluster (base at origin)
+  // build normalized groups, classify & filter
   const groups=[];
   for(const cl of clusters){
     if(cl.length===0) continue;
+    const hasGreen = cl.some(m=>isFoliage(m.col));
+    const greyOnly = cl.every(m=>isGrey(m.col));
     const g=new THREE.Group();
     for(const m of cl){ const mesh=new THREE.Mesh(m.o.geometry, m.o.material); mesh.applyMatrix4(m.o.matrixWorld);
       mesh.castShadow=true; mesh.receiveShadow=true; g.add(mesh); }
     const box=new THREE.Box3().setFromObject(g); const cx=(box.min.x+box.max.x)/2, cz=(box.min.z+box.max.z)/2, minY=box.min.y;
-    const sz=new THREE.Vector3(); box.getSize(sz);
+    const sz=new THREE.Vector3(); box.getSize(sz); const maxXZ=Math.max(sz.x,sz.z);
+    // keep palms/grass (green, not too sprawling) and small grey rocks; drop the rest (plane, big boulders)
+    let keep=false, type='';
+    if (hasGreen && maxXZ < 12 && sz.y > 0.6) { keep=true; type = sz.y>2.8 ? 'palm':'grass'; }
+    else if (greyOnly && maxXZ < 4.8 && sz.y > 0.5) { keep=true; type='rock'; }
+    if (!keep) continue;
     g.children.forEach(ch=>{ ch.position.x-=cx; ch.position.y-=minY; ch.position.z-=cz; });
-    g.userData.h = sz.y;
+    g.userData = { h: sz.y, type };
     groups.push(g);
   }
-  // keep meaningful props (drop tiny noise), prefer taller (palms) + medium (rocks/grass)
-  return groups.filter(g => g.userData.h > 0.6);
+  console.log('prop prototypes:', groups.map(g=>g.userData.type).join(','));
+  return groups;
 }
 
 const _ray=new THREE.Raycaster(), _down=new THREE.Vector3(0,-1,0);
 function scatterProps(groups){
   if(!groups.length){ console.warn('no props'); return; }
+  // weighted pool: lots of palms/grass, few rocks
+  const pool=[]; groups.forEach(g=>{ const w = g.userData.type==='palm'?4 : g.userData.type==='grass'?3 : 1; for(let k=0;k<w;k++) pool.push(g); });
+  const SCALE = { palm:[0.26,0.4], grass:[0.2,0.34], rock:[0.3,0.55] };
   island.geometry.computeBoundingBox();
   const bb=island.geometry.boundingBox;
-  let placed=0, tries=0, target=150;
-  while(placed<target && tries<target*12){
+  let placed=0, tries=0, target=260;
+  while(placed<target && tries<target*14){
     tries++;
     const x=THREE.MathUtils.lerp(bb.min.x,bb.max.x,Math.random());
     const z=THREE.MathUtils.lerp(bb.min.z,bb.max.z,Math.random());
     _ray.set(new THREE.Vector3(x,600,z), _down);
     const hit=_ray.intersectObject(island,true)[0];
     if(!hit || hit.point.y < seaLevel+0.3) continue;
-    const g=groups[(Math.random()*groups.length)|0].clone();
-    const sc=(0.4+Math.random()*0.35) * (54/60);
-    g.scale.setScalar(sc); g.rotation.y=Math.random()*6.28;
-    g.position.set(hit.point.x, hit.point.y-0.1, hit.point.z);
+    const proto = pool[(Math.random()*pool.length)|0];
+    const g = proto.clone();
+    const r = SCALE[proto.userData.type] || [0.3,0.45];
+    g.scale.setScalar(r[0] + Math.random()*(r[1]-r[0]));
+    g.rotation.y = Math.random()*6.28;
+    g.position.set(hit.point.x, hit.point.y-0.05, hit.point.z);
     scene.add(g); placed++;
   }
   console.log('placed props:', placed, 'from', groups.length, 'prototypes');
